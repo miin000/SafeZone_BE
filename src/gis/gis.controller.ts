@@ -1,11 +1,17 @@
-import { Controller, Get, Post, Put, Delete, Query, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Query, Param, Body, Req, UseGuards } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
 import { GisService } from './gis.service';
 import { CreateCaseDto } from './dto/create-case.dto';
 import { UpdateCaseDto } from './dto/update-case.dto';
+import { AuditLogService } from '../admin/audit-log.service';
+import { AuditAction, AuditResource } from '../admin/entities/audit-log.entity';
 
 @Controller('gis')
 export class GisController {
-  constructor(private readonly gisService: GisService) {}
+  constructor(
+    private readonly gisService: GisService,
+    private readonly auditLogService: AuditLogService,
+  ) {}
 
   @Get('regions')
   getRegions() {
@@ -44,23 +50,74 @@ export class GisController {
   }
 
   @Get('cases/:id')
-  getCaseById(@Param('id') id: string) {
-    return this.gisService.getCaseById(id);
+  async getCaseById(@Param('id') id: string, @Req() req: any) {
+    const caseData = await this.gisService.getCaseById(id);
+    
+    // Log view action if user is authenticated
+    if (req.user) {
+      this.auditLogService.log(
+        req.user.id,
+        AuditAction.VIEW,
+        AuditResource.CASE,
+        id,
+        `Viewed case #${id}`,
+      );
+    }
+    
+    return caseData;
   }
 
   @Post('cases')
-  createCase(@Body() dto: CreateCaseDto) {
-    return this.gisService.createCase(dto);
+  @UseGuards(AuthGuard('jwt'))
+  async createCase(@Body() dto: CreateCaseDto, @Req() req: any) {
+    const newCase = await this.gisService.createCase(dto);
+    
+    // Log create action
+    this.auditLogService.log(
+      req.user.id,
+      AuditAction.CREATE,
+      AuditResource.CASE,
+      String(newCase.id),
+      `Created new case: ${dto.disease_type}`,
+      { disease_type: dto.disease_type, severity: dto.severity },
+    );
+    
+    return newCase;
   }
 
   @Put('cases/:id')
-  updateCase(@Param('id') id: string, @Body() dto: UpdateCaseDto) {
-    return this.gisService.updateCase(id, dto);
+  @UseGuards(AuthGuard('jwt'))
+  async updateCase(@Param('id') id: string, @Body() dto: UpdateCaseDto, @Req() req: any) {
+    const updated = await this.gisService.updateCase(id, dto);
+    
+    // Log update action
+    this.auditLogService.log(
+      req.user.id,
+      AuditAction.UPDATE,
+      AuditResource.CASE,
+      id,
+      `Updated case #${id}`,
+      { changes: dto },
+    );
+    
+    return updated;
   }
 
   @Delete('cases/:id')
-  deleteCase(@Param('id') id: string) {
-    return this.gisService.deleteCase(id);
+  @UseGuards(AuthGuard('jwt'))
+  async deleteCase(@Param('id') id: string, @Req() req: any) {
+    const result = await this.gisService.deleteCase(id);
+    
+    // Log delete action
+    this.auditLogService.log(
+      req.user.id,
+      AuditAction.DELETE,
+      AuditResource.CASE,
+      id,
+      `Deleted case #${id}`,
+    );
+    
+    return result;
   }
 
   @Get('stats')

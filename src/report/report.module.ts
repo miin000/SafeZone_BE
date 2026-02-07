@@ -6,12 +6,14 @@ import { Report } from './entities/report.entity';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
 import { GisModule } from '../gis/gis.module';
+import { AdminModule } from '../admin/admin.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Report]),
     AuthModule,
     NotificationModule,
+    AdminModule,
     forwardRef(() => GisModule),
   ],
   controllers: [ReportController],

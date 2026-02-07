@@ -12,6 +12,9 @@ import {
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../auth/entities/user.entity';
 import { HealthInfoService } from './health-info.service';
 import {
   CreateHealthInfoDto,
@@ -63,21 +66,21 @@ export class HealthInfoController {
   // ========== ADMIN ENDPOINTS (Cần đăng nhập) ==========
 
   /**
+   * Lấy thống kê (admin) - MUST BE BEFORE @Get()
+   */
+  @Get('stats')
+  @UseGuards(AuthGuard('jwt'))
+  getStats() {
+    return this.healthInfoService.getStats();
+  }
+
+  /**
    * Lấy tất cả thông tin y tế (admin)
    */
   @Get()
   @UseGuards(AuthGuard('jwt'))
   findAll(@Query() query: QueryHealthInfoDto) {
     return this.healthInfoService.findAll(query);
-  }
-
-  /**
-   * Lấy thống kê (admin)
-   */
-  @Get('stats')
-  @UseGuards(AuthGuard('jwt'))
-  getStats() {
-    return this.healthInfoService.getStats();
   }
 
   /**
@@ -90,19 +93,21 @@ export class HealthInfoController {
   }
 
   /**
-   * Tạo mới thông tin y tế (admin)
+   * Tạo mới thông tin y tế (admin + health authority)
    */
   @Post()
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
   create(@Body() createDto: CreateHealthInfoDto, @Request() req) {
-    return this.healthInfoService.create(createDto, req.user.userId);
+    return this.healthInfoService.create(createDto, req.user.id);
   }
 
   /**
-   * Cập nhật thông tin y tế (admin)
+   * Cập nhật thông tin y tế (admin + health authority)
    */
   @Patch(':id')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateDto: UpdateHealthInfoDto,
@@ -111,28 +116,31 @@ export class HealthInfoController {
   }
 
   /**
-   * Xuất bản thông tin y tế (admin)
+   * Xuất bản thông tin y tế (admin + health authority)
    */
   @Patch(':id/publish')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
   publish(@Param('id', ParseUUIDPipe) id: string) {
     return this.healthInfoService.publish(id);
   }
 
   /**
-   * Lưu trữ (ẩn) thông tin y tế (admin)
+   * Lưu trữ (ẩn) thông tin y tế (admin + health authority)
    */
   @Patch(':id/archive')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
   archive(@Param('id', ParseUUIDPipe) id: string) {
     return this.healthInfoService.archive(id);
   }
 
   /**
-   * Xóa thông tin y tế (admin)
+   * Xóa thông tin y tế (chỉ admin)
    */
   @Delete(':id')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN)
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.healthInfoService.remove(id);
   }

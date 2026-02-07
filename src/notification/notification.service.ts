@@ -134,6 +134,15 @@ export class NotificationService {
     await this.notificationRepository.remove(notification);
   }
 
+  // Get broadcast notification history for admin
+  async findBroadcastHistory(): Promise<Notification[]> {
+    return this.notificationRepository.find({
+      where: { isBroadcast: true },
+      order: { createdAt: 'DESC' },
+      take: 50,
+    });
+  }
+
   // Alert for epidemic zone
   async sendEpidemicAlert(
     zoneName: string,

@@ -69,27 +69,41 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto): Promise<{ user: User; token: string }> {
-    const { phone, password } = loginDto;
+    const { phone, email, password } = loginDto;
 
-    // Normalize phone number
-    const normalizedPhone = this.normalizePhoneNumber(phone);
-    
-    // Find user by phone
-    let user = await this.userRepository.findOne({ where: { phone: normalizedPhone } });
-    
-    // Also try original phone if not found
-    if (!user) {
-      user = await this.userRepository.findOne({ where: { phone } });
+    if (!phone && !email) {
+      throw new UnauthorizedException('Phải cung cấp email hoặc số điện thoại');
+    }
+
+    let user: User | null = null;
+
+    // Try to find user by email first
+    if (email) {
+      user = await this.userRepository.findOne({ where: { email } });
+    }
+
+    // If not found by email, try phone
+    if (!user && phone) {
+      // Normalize phone number
+      const normalizedPhone = this.normalizePhoneNumber(phone);
+      
+      // Find user by phone
+      user = await this.userRepository.findOne({ where: { phone: normalizedPhone } });
+      
+      // Also try original phone if not found
+      if (!user) {
+        user = await this.userRepository.findOne({ where: { phone } });
+      }
     }
 
     if (!user) {
-      throw new UnauthorizedException('Số điện thoại hoặc mật khẩu không đúng');
+      throw new UnauthorizedException('Email/Số điện thoại hoặc mật khẩu không đúng');
     }
 
     // Validate password
     const isPasswordValid = await bcrypt.compare(password, user.password!);
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Số điện thoại hoặc mật khẩu không đúng');
+      throw new UnauthorizedException('Email/Số điện thoại hoặc mật khẩu không đúng');
     }
 
     // Update last login

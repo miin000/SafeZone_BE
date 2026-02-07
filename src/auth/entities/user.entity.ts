@@ -8,8 +8,8 @@ import {
 
 export enum UserRole {
   USER = 'user',
+  HEALTH_AUTHORITY = 'health_authority',
   ADMIN = 'admin',
-  HEALTH_WORKER = 'health_worker',
 }
 
 @Entity('users')

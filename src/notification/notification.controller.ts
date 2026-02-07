@@ -10,15 +10,21 @@ import {
   Query,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../auth/entities/user.entity';
 import { NotificationService } from './notification.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { EmailService } from './email.service';
+import { NotificationType } from './entities/notification.entity';
+import { ZoneService } from '../zone/zone.service';
 
 @Controller('notifications')
 export class NotificationController {
   constructor(
     private readonly notificationService: NotificationService,
     private readonly emailService: EmailService,
+    private readonly zoneService: ZoneService,
   ) {}
 
   @UseGuards(AuthGuard('jwt'))
@@ -55,7 +61,44 @@ export class NotificationController {
   }
 
   // Admin endpoints
-  @UseGuards(AuthGuard('jwt'))
+  @Get('history')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
+  async getBroadcastHistory() {
+    return this.notificationService.findBroadcastHistory();
+  }
+
+  @Post('send')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
+  async send(@Body() body: { title: string; body: string; type: string; zoneId?: string }) {
+    // Send notification based on type (all users or specific zone)
+    if (body.type === 'zone' && body.zoneId) {
+      // Get zone info
+      const zone = await this.zoneService.findOne(body.zoneId);
+      
+      // Send as broadcast with zone info in data
+      return this.notificationService.createBroadcast(
+        body.title,
+        body.body,
+        NotificationType.EPIDEMIC_ALERT,
+        { 
+          zoneId: body.zoneId,
+          zoneName: zone.name,
+        },
+      );
+    } else {
+      // Broadcast to all users
+      return this.notificationService.createBroadcast(
+        body.title,
+        body.body,
+        NotificationType.SYSTEM,
+      );
+    }
+  }
+
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
   @Post('broadcast')
   async createBroadcast(@Body() createNotificationDto: CreateNotificationDto) {
     // TODO: Add admin guard

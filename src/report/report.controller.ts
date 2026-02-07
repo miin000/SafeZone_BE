@@ -17,10 +17,15 @@ import { UpdateReportDto } from './dto/update-report.dto';
 import { QueryReportDto } from './dto/query-report.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { PhoneVerifiedGuard } from '../auth/guards/phone-verified.guard';
+import { AuditLogService } from '../admin/audit-log.service';
+import { AuditAction, AuditResource } from '../admin/entities/audit-log.entity';
 
 @Controller('reports')
 export class ReportController {
-  constructor(private readonly reportService: ReportService) {}
+  constructor(
+    private readonly reportService: ReportService,
+    private readonly auditLogService: AuditLogService,
+  ) {}
 
   // Creating reports only requires phone verification
   @UseGuards(AuthGuard('jwt'), PhoneVerifiedGuard)
@@ -78,13 +83,29 @@ export class ReportController {
     @Body() updateStatusDto: UpdateStatusDto,
   ) {
     // TODO: Add admin guard
-    return this.reportService.updateStatus(
+    const result = await this.reportService.updateStatus(
       id,
       req.user.id,
       updateStatusDto.status,
       updateStatusDto.adminNote,
       updateStatusDto.createCase,
     );
+
+    // Log approval/rejection action
+    const action = updateStatusDto.status === 'verified' ? AuditAction.APPROVE :
+                   updateStatusDto.status === 'rejected' ? AuditAction.REJECT :
+                   AuditAction.UPDATE;
+    
+    this.auditLogService.log(
+      req.user.id,
+      action,
+      AuditResource.REPORT,
+      id,
+      `${updateStatusDto.status === 'verified' ? 'Approved' : updateStatusDto.status === 'rejected' ? 'Rejected' : 'Updated'} report #${id}`,
+      { status: updateStatusDto.status, adminNote: updateStatusDto.adminNote, createCase: updateStatusDto.createCase },
+    );
+
+    return result;
   }
 
   @UseGuards(AuthGuard('jwt'))

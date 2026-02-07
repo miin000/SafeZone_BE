@@ -39,11 +39,19 @@ export class PostService {
       .leftJoinAndSelect('post.user', 'user')
       .orderBy('post.createdAt', 'DESC');
 
-    // Default: only show approved posts for public
-    if (queryDto.status) {
-      queryBuilder.andWhere('post.status = :status', { status: queryDto.status });
+    // If showAll is true (for admin), don't filter by status unless specified
+    if (queryDto.showAll) {
+      // Admin can see all posts, optionally filter by status
+      if (queryDto.status) {
+        queryBuilder.andWhere('post.status = :status', { status: queryDto.status });
+      }
     } else {
-      queryBuilder.andWhere('post.status = :status', { status: PostStatus.APPROVED });
+      // Default: only show approved posts for public
+      if (queryDto.status) {
+        queryBuilder.andWhere('post.status = :status', { status: queryDto.status });
+      } else {
+        queryBuilder.andWhere('post.status = :status', { status: PostStatus.APPROVED });
+      }
     }
 
     if (queryDto.diseaseType) {

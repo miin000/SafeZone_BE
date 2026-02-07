@@ -11,6 +11,9 @@ import {
   Request,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../auth/entities/user.entity';
 import { ZoneService } from './zone.service';
 import { CreateZoneDto } from './dto/create-zone.dto';
 import { UpdateZoneDto } from './dto/update-zone.dto';
@@ -23,9 +26,9 @@ export class ZoneController {
     private readonly notificationService: NotificationService,
   ) {}
 
-  // Note: Auth temporarily disabled for admin web development
-  // @UseGuards(AuthGuard('jwt'))
   @Post()
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
   async create(@Body() createZoneDto: CreateZoneDto) {
     return this.zoneService.create(createZoneDto);
   }
@@ -97,21 +100,23 @@ export class ZoneController {
     return this.zoneService.findOne(id);
   }
 
-  // Note: Auth temporarily disabled for admin web development
-  // @UseGuards(AuthGuard('jwt'))
   @Patch(':id')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
   async update(@Param('id') id: string, @Body() updateZoneDto: UpdateZoneDto) {
     return this.zoneService.update(id, updateZoneDto);
   }
 
-  // @UseGuards(AuthGuard('jwt'))
   @Patch(':id/deactivate')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
   async deactivate(@Param('id') id: string) {
     return this.zoneService.deactivate(id);
   }
 
-  // @UseGuards(AuthGuard('jwt'))
   @Patch(':id/case-count')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
   async updateCaseCount(
     @Param('id') id: string,
     @Body('caseCount') caseCount: number,
@@ -119,8 +124,9 @@ export class ZoneController {
     return this.zoneService.updateCaseCount(id, caseCount);
   }
 
-  // @UseGuards(AuthGuard('jwt'))
   @Delete(':id')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN)
   async remove(@Param('id') id: string) {
     return this.zoneService.remove(id);
   }

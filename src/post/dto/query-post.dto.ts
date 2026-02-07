@@ -1,4 +1,5 @@
-import { IsOptional, IsString, IsEnum, IsNumberString } from 'class-validator';
+import { IsOptional, IsString, IsEnum, IsNumberString, IsBoolean } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { PostStatus } from '../entities/post.entity';
 
 export class QueryPostDto {
@@ -21,4 +22,9 @@ export class QueryPostDto {
   @IsOptional()
   @IsNumberString()
   limit?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  showAll?: boolean;
 }

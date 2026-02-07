@@ -1,10 +1,15 @@
-import { IsString, IsNotEmpty } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 
 export class LoginDto {
   @IsString({ message: 'Số điện thoại không hợp lệ' })
-  @IsNotEmpty({ message: 'Số điện thoại là bắt buộc' })
-  phone: string;
+  @IsOptional()
+  phone?: string;
+
+  @IsString({ message: 'Email không hợp lệ' })
+  @IsOptional()
+  email?: string;
 
   @IsString({ message: 'Mật khẩu không hợp lệ' })
+  @IsNotEmpty({ message: 'Mật khẩu là bắt buộc' })
   password: string;
 }
