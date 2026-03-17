@@ -1,4 +1,10 @@
-import { IsOptional, IsEnum, IsDateString, IsNumber, Min } from 'class-validator';
+import {
+  IsOptional,
+  IsEnum,
+  IsDateString,
+  IsNumber,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ReportStatus } from '../entities/report.entity';
 

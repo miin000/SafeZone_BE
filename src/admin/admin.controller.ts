@@ -17,7 +17,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole, User } from '../auth/entities/user.entity';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { CreateUserDto, UpdateUserDto } from '../auth/dto/user-management.dto';
 import { AuditLogService } from './audit-log.service';
@@ -42,7 +42,7 @@ export class AdminController {
       await this.dataSource.query(
         "ALTER TYPE users_role_enum ADD VALUE IF NOT EXISTS 'health_authority'",
       );
-      
+
       // Update existing data
       const result = await this.dataSource.query(
         "UPDATE users SET role = 'health_authority' WHERE role = 'health_worker'",
@@ -50,7 +50,8 @@ export class AdminController {
 
       return {
         success: true,
-        message: 'Role migration completed',updated: result[1],
+        message: 'Role migration completed',
+        updated: result[1],
       };
     } catch (err: any) {
       return {
@@ -65,10 +66,25 @@ export class AdminController {
    */
   @Get('users/staff')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ADMIN)
-  async listAdminUsers() {
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
+  async listAdminUsers(@Query('role') role?: string) {
+    let where: any = [
+      { role: UserRole.ADMIN },
+      { role: UserRole.HEALTH_AUTHORITY },
+    ];
+    if (role && role !== 'ALL') {
+      if (
+        ![UserRole.ADMIN, UserRole.HEALTH_AUTHORITY].includes(role as UserRole)
+      ) {
+        throw new BadRequestException(
+          'Chỉ hỗ trợ vai trò admin hoặc health_authority',
+        );
+      }
+      where = { role: role as UserRole };
+    }
+
     return this.userRepository.find({
-      where: [{ role: UserRole.ADMIN }, { role: UserRole.HEALTH_AUTHORITY }],
+      where,
       select: ['id', 'email', 'name', 'phone', 'role', 'isActive', 'createdAt'],
       order: { createdAt: 'DESC' },
     });
@@ -88,7 +104,17 @@ export class AdminController {
 
     const users = await this.userRepository.find({
       where,
-      select: ['id', 'email', 'name', 'phone', 'role', 'isActive', 'createdAt', 'updatedAt', 'lastLoginAt'],
+      select: [
+        'id',
+        'email',
+        'name',
+        'phone',
+        'role',
+        'isActive',
+        'createdAt',
+        'updatedAt',
+        'lastLoginAt',
+      ],
       order: { createdAt: 'DESC' },
     });
 
@@ -104,7 +130,19 @@ export class AdminController {
   async getUserById(@Param('id') id: string) {
     const user = await this.userRepository.findOne({
       where: { id },
-      select: ['id', 'email', 'name', 'phone', 'role', 'isActive', 'isEmailVerified', 'isPhoneVerified', 'createdAt', 'updatedAt', 'lastLoginAt'],
+      select: [
+        'id',
+        'email',
+        'name',
+        'phone',
+        'role',
+        'isActive',
+        'isEmailVerified',
+        'isPhoneVerified',
+        'createdAt',
+        'updatedAt',
+        'lastLoginAt',
+      ],
     });
 
     if (!user) {
@@ -151,6 +189,15 @@ export class AdminController {
       updateDto.password = await bcrypt.hash(updateDto.password, 10);
     }
 
+    if (
+      updateDto.role &&
+      ![UserRole.ADMIN, UserRole.HEALTH_AUTHORITY].includes(updateDto.role)
+    ) {
+      throw new BadRequestException(
+        'Trang quản trị chỉ được tạo/cập nhật tài khoản admin hoặc health_authority',
+      );
+    }
+
     // Update user
     Object.assign(user, updateDto);
     await this.userRepository.save(user);
@@ -186,6 +233,12 @@ export class AdminController {
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles(UserRole.ADMIN)
   async createUser(@Body() createDto: CreateUserDto) {
+    if (![UserRole.ADMIN, UserRole.HEALTH_AUTHORITY].includes(createDto.role)) {
+      throw new BadRequestException(
+        'Trang quản trị chỉ được tạo tài khoản admin hoặc health_authority',
+      );
+    }
+
     // Check if phone or email already exists
     const existing = await this.userRepository.findOne({
       where: [{ phone: createDto.phone }, { email: createDto.email }],
@@ -221,7 +274,8 @@ export class AdminController {
    */
   @Post('bootstrap')
   async bootstrapAdmin(
-    @Body() body: {
+    @Body()
+    body: {
       email: string;
       password: string;
       name: string;

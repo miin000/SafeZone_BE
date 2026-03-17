@@ -31,7 +31,7 @@ export class GisService {
   constructor(
     @Inject(getDataSourceToken())
     private readonly dataSource: DataSource,
-  ) { }
+  ) {}
 
   async getRegionsGeoJSON() {
     const [row] = await this.dataSource.query(`
@@ -51,7 +51,12 @@ export class GisService {
     return row.geojson;
   }
 
-  async getCasesGeoJSON(params: { diseaseType?: string; status?: string; from?: string; to?: string }) {
+  async getCasesGeoJSON(params: {
+    diseaseType?: string;
+    status?: string;
+    from?: string;
+    to?: string;
+  }) {
     const { diseaseType, status, from, to } = params;
 
     const where: string[] = [];
@@ -92,7 +97,7 @@ export class GisService {
               'reported_time', c.reported_time,
               'region_id', c.region_id,
               'severity', c.severity,
-              'region_name', r."TinhThanh",
+              'region_name', COALESCE(r."TinhThanh", c.admin_unit_text),
               'patient_name', c.patient_name,
               'patient_age', c.patient_age,
               'patient_gender', c.patient_gender,
@@ -130,7 +135,7 @@ export class GisService {
       c.notes,
       ST_Y(c.geom) AS lat,
       ST_X(c.geom) AS lon,
-      r."TinhThanh" AS region_name
+      COALESCE(r."TinhThanh", c.admin_unit_text) AS region_name
     FROM cases c
     LEFT JOIN regions r ON r.id = c.region_id
     WHERE c.id = $1
@@ -145,7 +150,6 @@ export class GisService {
     return rows[0];
   }
 
-
   async getCasesList(params: {
     diseaseType?: string;
     status?: string;
@@ -155,7 +159,15 @@ export class GisService {
     limit?: number;
     search?: string;
   }) {
-    const { diseaseType, status, from, to, page = 1, limit = 50, search } = params;
+    const {
+      diseaseType,
+      status,
+      from,
+      to,
+      page = 1,
+      limit = 50,
+      search,
+    } = params;
 
     const where: string[] = [];
     const values: any[] = [];
@@ -178,7 +190,9 @@ export class GisService {
     }
     if (search) {
       values.push(`%${search}%`);
-      where.push(`(c.external_id ILIKE $${values.length} OR c.patient_name ILIKE $${values.length})`);
+      where.push(
+        `(c.external_id ILIKE $${values.length} OR c.patient_name ILIKE $${values.length})`,
+      );
     }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -207,7 +221,7 @@ export class GisService {
         c.notes,
         ST_Y(c.geom::geometry) AS lat,
         ST_X(c.geom::geometry) AS lon,
-        r."TinhThanh" AS region_name
+        COALESCE(r."TinhThanh", c.admin_unit_text) AS region_name
       FROM cases c
       LEFT JOIN regions r ON r.id = c.region_id
       ${whereSql}
@@ -227,15 +241,54 @@ export class GisService {
   }
 
   async createCase(dto: CaseDto) {
-    const { disease_type, status, severity = 1, reported_time, lat, lon, region_id, patient_name, patient_age, patient_gender, notes } = dto;
+    const {
+      disease_type,
+      status,
+      severity = 1,
+      reported_time,
+      lat,
+      lon,
+      region_id,
+      patient_name,
+      patient_age,
+      patient_gender,
+      notes,
+    } = dto;
 
     const [result] = await this.dataSource.query(
       `
-      INSERT INTO cases (disease_type, status, severity, reported_time, geom, region_id, patient_name, patient_age, patient_gender, notes)
-      VALUES ($1, $2, $3, $4::timestamptz, ST_SetSRID(ST_MakePoint($5, $6), 4326), $7, $8, $9, $10, $11)
-      RETURNING id, external_id, disease_type, status, severity, reported_time, region_id, patient_name, patient_age, patient_gender, notes
+      WITH inserted AS (
+        INSERT INTO cases (
+          disease_type, status, severity, reported_time, geom, 
+          region_id, admin_unit_text, patient_name, patient_age, patient_gender, notes
+        )
+        VALUES (
+          $1, $2, $3, $4::timestamptz, ST_SetSRID(ST_MakePoint($5, $6), 4326),
+          COALESCE(
+            $7, 
+            (SELECT id FROM regions WHERE ST_Contains(geom, ST_SetSRID(ST_MakePoint($5, $6), 4326)) LIMIT 1)
+          ),
+          (SELECT "TinhThanh" FROM regions WHERE ST_Contains(geom, ST_SetSRID(ST_MakePoint($5, $6), 4326)) LIMIT 1),
+          $8, $9, $10, $11
+        )
+        RETURNING *
+      )
+      SELECT id, external_id, disease_type, status, severity, reported_time, region_id, admin_unit_text, patient_name, patient_age, patient_gender, notes 
+      FROM inserted
       `,
-      [disease_type, status, severity, reported_time, lon, lat, region_id || null, patient_name || null, patient_age || null, patient_gender || null, notes || null],
+      [
+        disease_type,
+        status,
+        severity,
+        reported_time,
+        lon,
+        lat,
+        region_id || null,
+        patient_name || null,
+        patient_age || null,
+        patient_gender || null,
+        notes || null,
+      ],
     );
 
     return result;
@@ -253,18 +306,23 @@ export class GisService {
       return `$${values.length}`;
     };
 
-    if (dto.disease_type !== undefined) updates.push(`disease_type = ${push(dto.disease_type)}`);
+    if (dto.disease_type !== undefined)
+      updates.push(`disease_type = ${push(dto.disease_type)}`);
     if (dto.status !== undefined) updates.push(`status = ${push(dto.status)}`);
-    if (dto.severity !== undefined) updates.push(`severity = ${push(dto.severity)}`);
+    if (dto.severity !== undefined)
+      updates.push(`severity = ${push(dto.severity)}`);
 
     if (dto.reported_time !== undefined) {
       updates.push(`reported_time = ${push(dto.reported_time)}::timestamptz`);
     }
 
     // notes/patient
-    if (dto.patient_name !== undefined) updates.push(`patient_name = ${push(dto.patient_name)}`);
-    if (dto.patient_age !== undefined) updates.push(`patient_age = ${push(dto.patient_age)}`);
-    if (dto.patient_gender !== undefined) updates.push(`patient_gender = ${push(dto.patient_gender)}`);
+    if (dto.patient_name !== undefined)
+      updates.push(`patient_name = ${push(dto.patient_name)}`);
+    if (dto.patient_age !== undefined)
+      updates.push(`patient_age = ${push(dto.patient_age)}`);
+    if (dto.patient_gender !== undefined)
+      updates.push(`patient_gender = ${push(dto.patient_gender)}`);
     if (dto.notes !== undefined) updates.push(`notes = ${push(dto.notes)}`);
 
     // geom + region_id logic
@@ -282,14 +340,22 @@ export class GisService {
 
       // Nếu user không truyền region_id, tự gán theo ST_Within(newPoint)
       if (dto.region_id === undefined) {
-        updates.push(`
+        updates.push(
+          `
         region_id = (
           SELECT r.id
           FROM regions r
           WHERE ST_Within(${newPointSql}, r.geom)
           LIMIT 1
+        ),
+        admin_unit_text = (
+          SELECT r."TinhThanh"
+          FROM regions r
+          WHERE ST_Within(${newPointSql}, r.geom)
+          LIMIT 1
         )
-      `.trim());
+      `.trim(),
+        );
       }
     } else if (hasLat !== hasLon) {
       // tránh update nửa vời
@@ -297,7 +363,8 @@ export class GisService {
     }
 
     // nếu region_id được truyền explicit thì ưu tiên theo dto
-    if (dto.region_id !== undefined) updates.push(`region_id = ${push(dto.region_id)}`);
+    if (dto.region_id !== undefined)
+      updates.push(`region_id = ${push(dto.region_id)}`);
 
     if (updates.length === 0) return existing;
 
@@ -312,7 +379,6 @@ export class GisService {
     return this.getCaseById(id);
   }
 
-
   async deleteCase(id: string) {
     const existing = await this.getCaseById(id);
     if (!existing) throw new NotFoundException(`Case with ID ${id} not found`);
@@ -321,8 +387,12 @@ export class GisService {
     return { deleted: true, id };
   }
 
-
-  async getStats(params: { diseaseType?: string; status?: string; from?: string; to?: string }) {
+  async getStats(params: {
+    diseaseType?: string;
+    status?: string;
+    from?: string;
+    to?: string;
+  }) {
     const { diseaseType, status, from, to } = params;
 
     const where: string[] = [];
@@ -448,18 +518,44 @@ export class GisService {
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const dayBeforeYesterday = new Date(
+      now.getTime() - 2 * 24 * 60 * 60 * 1000,
+    );
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
 
     const [comparison] = await this.dataSource.query(
       `
-      SELECT
-        COUNT(*) FILTER (WHERE c.reported_time >= $1)::int AS current_period,
-        COUNT(*) FILTER (WHERE c.reported_time >= $2 AND c.reported_time < $1)::int AS previous_period
-      FROM cases c
-      `,
-      [thirtyDaysAgo.toISOString(), sixtyDaysAgo.toISOString()],
+        SELECT
+          COUNT(*) FILTER (WHERE c.reported_time >= $1)::int AS current_period,
+          COUNT(*) FILTER (WHERE c.reported_time >= $2 AND c.reported_time < $1)::int AS previous_period,
+          COUNT(*) FILTER (WHERE c.reported_time >= $3)::int AS today_cases,
+          COUNT(*) FILTER (WHERE c.reported_time >= $4 AND c.reported_time < $3)::int AS yesterday_cases,
+          COUNT(*) FILTER (WHERE c.reported_time >= $5)::int AS this_week_cases,
+          COUNT(*) FILTER (WHERE c.reported_time >= $6 AND c.reported_time < $5)::int AS last_week_cases
+        FROM cases c
+        `,
+      [
+        thirtyDaysAgo.toISOString(),
+        sixtyDaysAgo.toISOString(),
+        yesterday.toISOString(),
+        dayBeforeYesterday.toISOString(),
+        sevenDaysAgo.toISOString(),
+        fourteenDaysAgo.toISOString(),
+      ],
     );
 
-    return { summary, topRegions, byDay, byDisease, byStatus, byMonth, byWeek: byWeek.reverse(), comparison };
+    return {
+      summary,
+      topRegions,
+      byDay,
+      byDisease,
+      byStatus,
+      byMonth,
+      byWeek: byWeek.reverse(),
+      comparison,
+    };
   }
 
   /**
@@ -585,7 +681,7 @@ export class GisService {
     const processedGrid = simplifiedRows.map((cell: any) => {
       const riskScore = cell.count * (cell.avg_severity || 1);
       let riskLevel: 'low' | 'medium' | 'high' | 'critical';
-      
+
       if (riskScore >= 15 || cell.count >= 10) {
         riskLevel = 'critical';
       } else if (riskScore >= 8 || cell.count >= 5) {
@@ -619,11 +715,19 @@ export class GisService {
       totalCells: processedGrid.length,
       cells: processedGrid,
       stats: {
-        totalCases: processedGrid.reduce((sum: number, c: any) => sum + c.count, 0),
-        criticalCells: processedGrid.filter((c: any) => c.riskLevel === 'critical').length,
-        highCells: processedGrid.filter((c: any) => c.riskLevel === 'high').length,
-        mediumCells: processedGrid.filter((c: any) => c.riskLevel === 'medium').length,
-        lowCells: processedGrid.filter((c: any) => c.riskLevel === 'low').length,
+        totalCases: processedGrid.reduce(
+          (sum: number, c: any) => sum + c.count,
+          0,
+        ),
+        criticalCells: processedGrid.filter(
+          (c: any) => c.riskLevel === 'critical',
+        ).length,
+        highCells: processedGrid.filter((c: any) => c.riskLevel === 'high')
+          .length,
+        mediumCells: processedGrid.filter((c: any) => c.riskLevel === 'medium')
+          .length,
+        lowCells: processedGrid.filter((c: any) => c.riskLevel === 'low')
+          .length,
       },
     };
   }
@@ -704,7 +808,7 @@ export class GisService {
       // Combined severity considers both count and average severity
       const combinedScore = cluster.count * (cluster.avg_severity || 1);
       let clusterSeverity: number;
-      
+
       if (combinedScore >= 15 || cluster.max_severity >= 3) {
         clusterSeverity = 3; // High
       } else if (combinedScore >= 5 || cluster.avg_severity >= 2) {
@@ -738,7 +842,10 @@ export class GisService {
     return {
       clusterDistance,
       totalClusters: processedClusters.length,
-      totalCases: processedClusters.reduce((sum: number, c: any) => sum + c.count, 0),
+      totalCases: processedClusters.reduce(
+        (sum: number, c: any) => sum + c.count,
+        0,
+      ),
       clusters: processedClusters,
     };
   }
@@ -747,7 +854,10 @@ export class GisService {
    * Reverse geocode coordinates to get address (commune, district, province)
    * First tries to match with local regions database for province, then uses Nominatim for full address
    */
-  async reverseGeocode(lat: number, lon: number): Promise<ReverseGeocodeResult> {
+  async reverseGeocode(
+    lat: number,
+    lon: number,
+  ): Promise<ReverseGeocodeResult> {
     let regionId: number | undefined;
     let provinceName: string | undefined;
 
@@ -790,16 +900,22 @@ export class GisService {
       if (response.ok) {
         const data = await response.json();
         const addr = data.address || {};
-        
+
         // Extract Vietnamese administrative divisions
-        const commune = addr.village || addr.suburb || addr.quarter || addr.hamlet;
-        const district = addr.county || addr.city_district || addr.town || addr.municipality;
-        const province = provinceName || addr.state || addr.province || addr.city;
+        const commune =
+          addr.village || addr.suburb || addr.quarter || addr.hamlet;
+        const district =
+          addr.county || addr.city_district || addr.town || addr.municipality;
+        const province =
+          provinceName || addr.state || addr.province || addr.city;
 
         const parts = [commune, district, province].filter(Boolean);
-        
+
         return {
-          address: parts.length > 0 ? parts.join(', ') : (data.display_name || `${lat.toFixed(6)}, ${lon.toFixed(6)}`),
+          address:
+            parts.length > 0
+              ? parts.join(', ')
+              : data.display_name || `${lat.toFixed(6)}, ${lon.toFixed(6)}`,
           commune,
           district,
           province,

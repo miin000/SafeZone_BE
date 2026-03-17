@@ -11,6 +11,7 @@ import { NotificationModule } from './notification/notification.module';
 import { PostModule } from './post/post.module';
 import { HealthInfoModule } from './health-info/health-info.module';
 import { AdminModule } from './admin/admin.module';
+import { DiseaseModule } from './disease/disease.module';
 
 @Module({
   imports: [
@@ -27,7 +28,10 @@ import { AdminModule } from './admin/admin.module';
       autoLoadEntities: true,
       synchronize: false, // Disabled to prevent enum migration issues
       // SSL configuration for cloud databases (Neon, etc.)
-      ssl: process.env.DB_SSL_MODE === 'require' ? { rejectUnauthorized: false } : false,
+      ssl:
+        process.env.DB_SSL_MODE === 'require'
+          ? { rejectUnauthorized: false }
+          : false,
     }),
     GisModule,
     AuthModule,
@@ -37,6 +41,7 @@ import { AdminModule } from './admin/admin.module';
     PostModule,
     HealthInfoModule,
     AdminModule,
+    DiseaseModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -32,28 +32,43 @@ export class PushService implements OnModuleInit {
       }
 
       // Try to load service account from file
-      const serviceAccountPath = path.join(process.cwd(), 'firebase-service-account.json');
-      
+      const serviceAccountPath = path.join(
+        process.cwd(),
+        'firebase-service-account.json',
+      );
+
       if (fs.existsSync(serviceAccountPath)) {
-        const serviceAccountContent = fs.readFileSync(serviceAccountPath, 'utf8');
+        const serviceAccountContent = fs.readFileSync(
+          serviceAccountPath,
+          'utf8',
+        );
         const serviceAccount = JSON.parse(serviceAccountContent);
-        
+
         // Ensure private key is properly formatted
         if (serviceAccount.private_key) {
-          serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+          serviceAccount.private_key = serviceAccount.private_key.replace(
+            /\\n/g,
+            '\n',
+          );
         }
-        
+
         admin.initializeApp({
           credential: admin.credential.cert(serviceAccount),
         });
 
         this.isInitialized = true;
-        this.logger.log(`✅ Firebase Admin initialized with project: ${serviceAccount.project_id}`);
+        this.logger.log(
+          `✅ Firebase Admin initialized with project: ${serviceAccount.project_id}`,
+        );
       } else {
         // Try to load from environment variables
         const projectId = this.configService.get<string>('FIREBASE_PROJECT_ID');
-        const clientEmail = this.configService.get<string>('FIREBASE_CLIENT_EMAIL');
-        const privateKey = this.configService.get<string>('FIREBASE_PRIVATE_KEY');
+        const clientEmail = this.configService.get<string>(
+          'FIREBASE_CLIENT_EMAIL',
+        );
+        const privateKey = this.configService.get<string>(
+          'FIREBASE_PRIVATE_KEY',
+        );
 
         if (projectId && clientEmail && privateKey) {
           admin.initializeApp({
@@ -65,9 +80,13 @@ export class PushService implements OnModuleInit {
           });
 
           this.isInitialized = true;
-          this.logger.log(`✅ Firebase Admin initialized from env: ${projectId}`);
+          this.logger.log(
+            `✅ Firebase Admin initialized from env: ${projectId}`,
+          );
         } else {
-          this.logger.warn('⚠️ Firebase not configured. Push notifications disabled.');
+          this.logger.warn(
+            '⚠️ Firebase not configured. Push notifications disabled.',
+          );
         }
       }
     } catch (error) {
@@ -83,7 +102,9 @@ export class PushService implements OnModuleInit {
     payload: PushNotificationPayload,
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     if (!this.isInitialized) {
-      this.logger.warn('[PUSH] Firebase not initialized, logging notification:');
+      this.logger.warn(
+        '[PUSH] Firebase not initialized, logging notification:',
+      );
       this.logger.log(`  To: ${token.substring(0, 20)}...`);
       this.logger.log(`  Title: ${payload.title}`);
       this.logger.log(`  Body: ${payload.body}`);
@@ -133,13 +154,15 @@ export class PushService implements OnModuleInit {
       return { success: true, messageId: response };
     } catch (error) {
       this.logger.error(`❌ Failed to send push: ${error.message}`);
-      
+
       // Handle invalid token
-      if (error.code === 'messaging/invalid-registration-token' ||
-          error.code === 'messaging/registration-token-not-registered') {
+      if (
+        error.code === 'messaging/invalid-registration-token' ||
+        error.code === 'messaging/registration-token-not-registered'
+      ) {
         return { success: false, error: 'invalid_token' };
       }
-      
+
       return { success: false, error: error.message };
     }
   }
@@ -150,9 +173,17 @@ export class PushService implements OnModuleInit {
   async sendToDevices(
     tokens: string[],
     payload: PushNotificationPayload,
-  ): Promise<{ successCount: number; failureCount: number; invalidTokens: string[] }> {
+  ): Promise<{
+    successCount: number;
+    failureCount: number;
+    invalidTokens: string[];
+  }> {
     if (!this.isInitialized || tokens.length === 0) {
-      return { successCount: 0, failureCount: tokens.length, invalidTokens: [] };
+      return {
+        successCount: 0,
+        failureCount: tokens.length,
+        invalidTokens: [],
+      };
     }
 
     const invalidTokens: string[] = [];
@@ -191,15 +222,17 @@ export class PushService implements OnModuleInit {
         };
 
         const response = await admin.messaging().sendEachForMulticast(message);
-        
+
         successCount += response.successCount;
         failureCount += response.failureCount;
 
         // Collect invalid tokens
         response.responses.forEach((resp, idx) => {
           if (!resp.success && resp.error) {
-            if (resp.error.code === 'messaging/invalid-registration-token' ||
-                resp.error.code === 'messaging/registration-token-not-registered') {
+            if (
+              resp.error.code === 'messaging/invalid-registration-token' ||
+              resp.error.code === 'messaging/registration-token-not-registered'
+            ) {
               invalidTokens.push(batch[idx]);
             }
           }
@@ -210,7 +243,9 @@ export class PushService implements OnModuleInit {
       }
     }
 
-    this.logger.log(`📊 Push batch result: ${successCount} success, ${failureCount} failed`);
+    this.logger.log(
+      `📊 Push batch result: ${successCount} success, ${failureCount} failed`,
+    );
     return { successCount, failureCount, invalidTokens };
   }
 
@@ -259,7 +294,9 @@ export class PushService implements OnModuleInit {
       this.logger.log(`✅ Topic push sent: ${topic} -> ${response}`);
       return { success: true, messageId: response };
     } catch (error) {
-      this.logger.error(`❌ Failed to send to topic ${topic}: ${error.message}`);
+      this.logger.error(
+        `❌ Failed to send to topic ${topic}: ${error.message}`,
+      );
       return { success: false, error: error.message };
     }
   }
@@ -272,7 +309,9 @@ export class PushService implements OnModuleInit {
 
     try {
       await admin.messaging().subscribeToTopic(tokens, topic);
-      this.logger.log(`✅ Subscribed ${tokens.length} devices to topic: ${topic}`);
+      this.logger.log(
+        `✅ Subscribed ${tokens.length} devices to topic: ${topic}`,
+      );
     } catch (error) {
       this.logger.error(`❌ Failed to subscribe to topic: ${error.message}`);
     }
@@ -286,9 +325,13 @@ export class PushService implements OnModuleInit {
 
     try {
       await admin.messaging().unsubscribeFromTopic(tokens, topic);
-      this.logger.log(`✅ Unsubscribed ${tokens.length} devices from topic: ${topic}`);
+      this.logger.log(
+        `✅ Unsubscribed ${tokens.length} devices from topic: ${topic}`,
+      );
     } catch (error) {
-      this.logger.error(`❌ Failed to unsubscribe from topic: ${error.message}`);
+      this.logger.error(
+        `❌ Failed to unsubscribe from topic: ${error.message}`,
+      );
     }
   }
 

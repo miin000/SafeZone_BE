@@ -69,11 +69,11 @@ export class ZoneController {
   ) {
     const userId = req.user.sub;
     const zones = await this.zoneService.checkPointInZone(lat, lon);
-    
+
     if (zones.length > 0) {
       // User is in danger zone - send push notification
       const highestRiskZone = zones[0]; // Zones are sorted by risk level DESC
-      
+
       await this.notificationService.sendZoneEntryAlert(
         userId,
         highestRiskZone.name,

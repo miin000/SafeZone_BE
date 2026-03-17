@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Put, Delete, Query, Param, Body, Req, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Query,
+  Param,
+  Body,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { GisService } from './gis.service';
 import { CreateCaseDto } from './dto/create-case.dto';
@@ -52,7 +63,7 @@ export class GisController {
   @Get('cases/:id')
   async getCaseById(@Param('id') id: string, @Req() req: any) {
     const caseData = await this.gisService.getCaseById(id);
-    
+
     // Log view action if user is authenticated
     if (req.user) {
       this.auditLogService.log(
@@ -63,7 +74,7 @@ export class GisController {
         `Viewed case #${id}`,
       );
     }
-    
+
     return caseData;
   }
 
@@ -71,7 +82,7 @@ export class GisController {
   @UseGuards(AuthGuard('jwt'))
   async createCase(@Body() dto: CreateCaseDto, @Req() req: any) {
     const newCase = await this.gisService.createCase(dto);
-    
+
     // Log create action
     this.auditLogService.log(
       req.user.id,
@@ -81,15 +92,19 @@ export class GisController {
       `Created new case: ${dto.disease_type}`,
       { disease_type: dto.disease_type, severity: dto.severity },
     );
-    
+
     return newCase;
   }
 
   @Put('cases/:id')
   @UseGuards(AuthGuard('jwt'))
-  async updateCase(@Param('id') id: string, @Body() dto: UpdateCaseDto, @Req() req: any) {
+  async updateCase(
+    @Param('id') id: string,
+    @Body() dto: UpdateCaseDto,
+    @Req() req: any,
+  ) {
     const updated = await this.gisService.updateCase(id, dto);
-    
+
     // Log update action
     this.auditLogService.log(
       req.user.id,
@@ -99,7 +114,7 @@ export class GisController {
       `Updated case #${id}`,
       { changes: dto },
     );
-    
+
     return updated;
   }
 
@@ -107,7 +122,7 @@ export class GisController {
   @UseGuards(AuthGuard('jwt'))
   async deleteCase(@Param('id') id: string, @Req() req: any) {
     const result = await this.gisService.deleteCase(id);
-    
+
     // Log delete action
     this.auditLogService.log(
       req.user.id,
@@ -116,7 +131,7 @@ export class GisController {
       id,
       `Deleted case #${id}`,
     );
-    
+
     return result;
   }
 
@@ -142,14 +157,15 @@ export class GisController {
     @Query('east') east?: string,
     @Query('west') west?: string,
   ) {
-    const bounds = north && south && east && west
-      ? {
-          north: parseFloat(north),
-          south: parseFloat(south),
-          east: parseFloat(east),
-          west: parseFloat(west),
-        }
-      : undefined;
+    const bounds =
+      north && south && east && west
+        ? {
+            north: parseFloat(north),
+            south: parseFloat(south),
+            east: parseFloat(east),
+            west: parseFloat(west),
+          }
+        : undefined;
 
     return this.gisService.getGridDensity({
       diseaseType,
@@ -179,13 +195,7 @@ export class GisController {
   }
 
   @Get('reverse-geocode')
-  reverseGeocode(
-    @Query('lat') lat: string,
-    @Query('lon') lon: string,
-  ) {
-    return this.gisService.reverseGeocode(
-      parseFloat(lat),
-      parseFloat(lon),
-    );
+  reverseGeocode(@Query('lat') lat: string, @Query('lon') lon: string) {
+    return this.gisService.reverseGeocode(parseFloat(lat), parseFloat(lon));
   }
 }

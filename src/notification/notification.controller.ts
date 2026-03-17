@@ -71,18 +71,26 @@ export class NotificationController {
   @Post('send')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
-  async send(@Body() body: { title: string; body: string; type: string; zoneId?: string }) {
+  async send(
+    @Body()
+    body: {
+      title: string;
+      body: string;
+      type: string;
+      zoneId?: string;
+    },
+  ) {
     // Send notification based on type (all users or specific zone)
     if (body.type === 'zone' && body.zoneId) {
       // Get zone info
       const zone = await this.zoneService.findOne(body.zoneId);
-      
+
       // Send as broadcast with zone info in data
       return this.notificationService.createBroadcast(
         body.title,
         body.body,
         NotificationType.EPIDEMIC_ALERT,
-        { 
+        {
           zoneId: body.zoneId,
           zoneName: zone.name,
         },
@@ -130,13 +138,22 @@ export class NotificationController {
   @Get('test-email')
   async testEmail(@Query('email') email: string) {
     if (!email) {
-      return { success: false, message: 'Email parameter required. Use ?email=your@email.com' };
+      return {
+        success: false,
+        message: 'Email parameter required. Use ?email=your@email.com',
+      };
     }
-    
-    const result = await this.emailService.sendOtpEmail(email, '123456', 'Test User');
-    return { 
-      success: result, 
-      message: result ? 'Email sent successfully! Check your inbox.' : 'Failed to send email. Check server logs.'
+
+    const result = await this.emailService.sendOtpEmail(
+      email,
+      '123456',
+      'Test User',
+    );
+    return {
+      success: result,
+      message: result
+        ? 'Email sent successfully! Check your inbox.'
+        : 'Failed to send email. Check server logs.',
     };
   }
 }

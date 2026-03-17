@@ -24,6 +24,10 @@ export class PatientInfoDto {
   age?: number;
 
   @IsOptional()
+  @IsNumber()
+  yearOfBirth?: number;
+
+  @IsOptional()
   @IsEnum(['male', 'female', 'other'])
   gender?: 'male' | 'female' | 'other';
 
@@ -49,11 +53,11 @@ export class PatientInfoDto {
 
   @IsOptional()
   @IsDateString()
-  symptomOnsetDate?: string; // Ngày khởi phát triệu chứng
+  symptomOnsetDate?: string;
 
   @IsOptional()
   @IsString()
-  healthFacility?: string; // Cơ sở y tế điều trị
+  healthFacility?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -61,26 +65,31 @@ export class PatientInfoDto {
 
   @IsOptional()
   @IsString()
-  travelHistory?: string; // Lịch sử di chuyển
+  travelHistory?: string;
 
   @IsOptional()
   @IsString()
-  contactHistory?: string; // Lịch sử tiếp xúc
+  contactHistory?: string;
 
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  underlyingConditions?: string[]; // Bệnh nền
+  underlyingConditions?: string[];
 }
 
 export class CreateReportDto {
+  // Report type: case_report or outbreak_alert
+  @IsOptional()
+  @IsEnum(['case_report', 'outbreak_alert'])
+  reportType?: 'case_report' | 'outbreak_alert';
+
   @IsString()
   diseaseType: string;
 
   @IsString()
   description: string;
 
-  // Case/incident location (where the case occurred)
+  // Case/incident location
   @IsNumber()
   @Min(-90)
   @Max(90)
@@ -91,7 +100,7 @@ export class CreateReportDto {
   @Max(180)
   lon: number;
 
-  // Reporter's current location (who is reporting)
+  // Reporter's current location
   @IsOptional()
   @IsNumber()
   @Min(-90)
@@ -123,13 +132,104 @@ export class CreateReportDto {
   @IsString({ each: true })
   imageUrls?: string[];
 
-  // Detailed case report fields
+  // Severity level
+  @IsOptional()
+  @IsEnum(['low', 'medium', 'high', 'critical'])
+  severityLevel?: 'low' | 'medium' | 'high' | 'critical';
+
+  // Case report fields
   @IsOptional()
   @IsBoolean()
-  isDetailedReport?: boolean; // Flag to identify detailed reports
+  isDetailedReport?: boolean;
 
   @IsOptional()
   @ValidateNested()
   @Type(() => PatientInfoDto)
-  patientInfo?: PatientInfoDto; // Detailed patient information
+  patientInfo?: PatientInfoDto;
+
+  // Is the reporter the patient?
+  @IsOptional()
+  @IsBoolean()
+  isSelfReport?: boolean;
+
+  // Reporter info
+  @IsOptional()
+  @IsString()
+  reporterName?: string;
+
+  @IsOptional()
+  @IsString()
+  reporterPhone?: string;
+
+  // Epidemiological info
+  @IsOptional()
+  @IsBoolean()
+  hasContactWithPatient?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  hasVisitedEpidemicArea?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  hasSimilarCasesNearby?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  estimatedNearbyCount?: number;
+
+  // Medical visit
+  @IsOptional()
+  @IsBoolean()
+  hasVisitedDoctor?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  hasTestResult?: boolean;
+
+  @IsOptional()
+  @IsString()
+  testResultDescription?: string;
+
+  // Evidence
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  testResultImageUrls?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  medicalCertImageUrls?: string[];
+
+  // Outbreak alert fields
+  @IsOptional()
+  @IsString()
+  locationDescription?: string;
+
+  @IsOptional()
+  @IsEnum(['school', 'factory', 'residential', 'market', 'hospital', 'other'])
+  locationType?: string;
+
+  @IsOptional()
+  @IsString()
+  suspectedDisease?: string;
+
+  @IsOptional()
+  @IsString()
+  outbreakDescription?: string;
+
+  @IsOptional()
+  @IsDateString()
+  discoveryTime?: string;
+
+  // Consent
+  @IsOptional()
+  @IsBoolean()
+  reporterConsent?: boolean;
+
+  // Device ID for anti-spam
+  @IsOptional()
+  @IsString()
+  deviceId?: string;
 }

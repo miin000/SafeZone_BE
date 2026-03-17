@@ -135,7 +135,9 @@ export class HealthInfoService {
     });
 
     if (!healthInfo) {
-      throw new NotFoundException(`Không tìm thấy thông tin y tế với ID: ${id}`);
+      throw new NotFoundException(
+        `Không tìm thấy thông tin y tế với ID: ${id}`,
+      );
     }
 
     return healthInfo;
@@ -148,7 +150,9 @@ export class HealthInfoService {
     });
 
     if (!healthInfo) {
-      throw new NotFoundException(`Không tìm thấy thông tin y tế với ID: ${id}`);
+      throw new NotFoundException(
+        `Không tìm thấy thông tin y tế với ID: ${id}`,
+      );
     }
 
     // Increment view count

@@ -1,4 +1,10 @@
-import { IsOptional, IsString, IsEnum, IsNumberString, IsBoolean } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsEnum,
+  IsNumberString,
+  IsBoolean,
+} from 'class-validator';
 import { Transform } from 'class-transformer';
 import { PostStatus } from '../entities/post.entity';
 

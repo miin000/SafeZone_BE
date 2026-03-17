@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
 export interface EmailOptions {
   to: string;
@@ -12,166 +12,133 @@ export interface EmailOptions {
 @Injectable()
 export class EmailService implements OnModuleInit {
   private readonly logger = new Logger(EmailService.name);
-  private transporter: nodemailer.Transporter;
   private isConfigured = false;
+  private resend: Resend;
+  private apiKey: string;
   private senderEmail: string;
+  private senderName: string;
 
   constructor(private readonly configService: ConfigService) {}
 
   async onModuleInit() {
-    // Configure email transporter after ConfigModule is fully loaded
-    // Using Mailjet SMTP (Free tier: 200 emails/day, 6000 emails/month)
-    // Sign up at https://www.mailjet.com
-    
-    const apiKey = this.configService.get<string>('MAILJET_API_KEY');
-    const secretKey = this.configService.get<string>('MAILJET_SECRET_KEY');
-    this.senderEmail = this.configService.get<string>('MAILJET_SENDER_EMAIL') || 'no-reply@safezone.website';
+    // Configure Resend email service
+    // Sign up at https://resend.com (free tier: 3000 emails/month)
 
-    const port = parseInt(this.configService.get<string>('MAILJET_PORT') || '465');
-    const emailConfig = {
-      host: this.configService.get<string>('MAILJET_HOST') || 'in-v3.mailjet.com',
-      port: port,
-      secure: port === 465, // true for port 465 (SSL), false for port 587 (STARTTLS)
-      auth: {
-        user: apiKey,
-        pass: secretKey,
-      },
-    };
+    this.apiKey = this.configService.get<string>('RESEND_API_KEY') || '';
+    this.senderEmail =
+      this.configService.get<string>('RESEND_SENDER_EMAIL') ||
+      'onboarding@resend.dev';
+    this.senderName =
+      this.configService.get<string>('RESEND_SENDER_NAME') || 'SafeZone';
 
-    this.logger.log(`Mailjet Config - Host: ${emailConfig.host}, Port: ${emailConfig.port}, Secure: ${emailConfig.secure}`);
-    this.logger.log(`Mailjet API Key: ${apiKey ? apiKey.substring(0, 8) + '...' : 'NOT SET'}`);
-    this.logger.log(`Mailjet Secret Key: ${secretKey ? secretKey.substring(0, 8) + '...' : 'NOT SET'}`);
-    this.logger.log(`Mailjet Sender Email: ${this.senderEmail}`);
+    this.logger.log(
+      `Resend API Key: ${this.apiKey ? this.apiKey.substring(0, 10) + '...' : 'NOT SET'}`,
+    );
+    this.logger.log(`Resend Sender Email: ${this.senderEmail}`);
+    this.logger.log(`Resend Sender Name: ${this.senderName}`);
 
-    // Only create transporter if Mailjet credentials are provided
-    if (apiKey && secretKey) {
-      this.transporter = nodemailer.createTransport(emailConfig);
+    if (this.apiKey) {
+      this.resend = new Resend(this.apiKey);
       this.isConfigured = true;
-      this.logger.log('Mailjet email transporter configured');
-      
-      // Verify connection on startup
-      await this.verifyConnection();
+      this.logger.log('✅ Resend email service configured');
     } else {
-      this.logger.warn('⚠️ Mailjet credentials not configured. Emails will be logged to console only.');
-      this.logger.warn('   MAILJET_API_KEY: ' + (apiKey ? 'SET' : 'NOT SET'));
-      this.logger.warn('   MAILJET_SECRET_KEY: ' + (secretKey ? 'SET' : 'NOT SET'));
-      this.logger.warn('Sign up for free at https://www.mailjet.com (200 emails/day free)');
-    }
-  }
-
-  private async verifyConnection(): Promise<void> {
-    try {
-      await this.transporter.verify();
-      this.logger.log('✅ Mailjet SMTP connection verified successfully!');
-    } catch (error) {
-      this.logger.error('❌ Mailjet SMTP connection verification failed!');
-      this.logger.error(`Error: ${error.message}`);
-      this.logger.error('Please check:');
-      this.logger.error('  1. MAILJET_API_KEY and MAILJET_SECRET_KEY are correct');
-      this.logger.error('  2. MAILJET_SENDER_EMAIL is verified in Mailjet dashboard');
-      this.logger.error('  3. Network can connect to in-v3.mailjet.com:587');
+      this.logger.warn(
+        '⚠️ Resend API key not configured. Emails will be logged to console only.',
+      );
+      this.logger.warn('   RESEND_API_KEY: NOT SET');
+      this.logger.warn(
+        'Sign up for free at https://resend.com (3000 emails/month free)',
+      );
+      this.logger.warn('Then set RESEND_API_KEY in .env file');
     }
   }
 
   async sendEmail(options: EmailOptions): Promise<boolean> {
     const { to, subject, text, html } = options;
 
-    // If transporter is not configured, just log
-    if (!this.transporter || !this.isConfigured) {
+    // If not configured, just log
+    if (!this.isConfigured) {
       this.logger.log('='.repeat(50));
       this.logger.log('[EMAIL - DEV MODE - NOT SENDING]');
       this.logger.log(`To: ${to}`);
       this.logger.log(`Subject: ${subject}`);
       this.logger.log(`Content: ${text || html?.substring(0, 200)}`);
       this.logger.log('='.repeat(50));
-      return true; // Return true in dev mode
+      return true;
     }
 
     try {
-      const mailOptions = {
-        from: `"SafeZone" <${this.senderEmail}>`,
-        to,
-        subject,
-        text,
-        html,
-      };
-
-      this.logger.log(`📧 Sending email...`);
+      this.logger.log(`📧 Sending email via Resend...`);
       this.logger.log(`   To: ${to}`);
-      this.logger.log(`   From: ${mailOptions.from}`);
+      this.logger.log(`   From: ${this.senderName} <${this.senderEmail}>`);
       this.logger.log(`   Subject: ${subject}`);
 
-      const info = await this.transporter.sendMail(mailOptions);
-      
+      const emailPayload: any = {
+        from: `${this.senderName} <${this.senderEmail}>`,
+        to: [to],
+        subject: subject,
+      };
+
+      if (html) emailPayload.html = html;
+      else if (text) emailPayload.text = text;
+
+      const response = await this.resend.emails.send(emailPayload);
+
+      if (response.error) {
+        this.logger.error(
+          `❌ Resend API error: ${JSON.stringify(response.error)}`,
+        );
+        return false;
+      }
+
       this.logger.log(`✅ Email sent successfully!`);
-      this.logger.log(`   Message ID: ${info.messageId}`);
-      this.logger.log(`   Response: ${info.response}`);
-      this.logger.log(`   Accepted: ${info.accepted?.join(', ')}`);
-      this.logger.log(`   Rejected: ${info.rejected?.join(', ') || 'none'}`);
-      
+      this.logger.log(`   Email ID: ${response.data?.id}`);
+
       return true;
     } catch (error) {
       this.logger.error(`❌ Failed to send email to ${to}`);
-      this.logger.error(`   Error Code: ${error.code}`);
-      this.logger.error(`   Error Message: ${error.message}`);
-      
-      if (error.responseCode) {
-        this.logger.error(`   SMTP Response Code: ${error.responseCode}`);
-      }
-      if (error.response) {
-        this.logger.error(`   SMTP Response: ${error.response}`);
-      }
-      
-      // Common errors
-      if (error.code === 'EAUTH') {
-        this.logger.error('   ⚠️  Authentication failed. Check MAILJET_API_KEY and MAILJET_SECRET_KEY');
-      } else if (error.code === 'ECONNECTION') {
-        this.logger.error('   ⚠️  Connection failed. Check network/firewall settings');
-      } else if (error.responseCode === 550) {
-        this.logger.error('   ⚠️  Sender email not verified. Verify email in Mailjet dashboard');
-      }
-      
+      this.logger.error(`   Error: ${error.message}`);
       return false;
     }
   }
 
-  async sendOtpEmail(email: string, otp: string, name?: string): Promise<boolean> {
-    const subject = 'Mã xác thực OTP - SafeZone';
+  async sendOtpEmail(
+    email: string,
+    otp: string,
+    name?: string,
+  ): Promise<boolean> {
+    const subject = 'SafeZone - Ma xac minh email cua ban';
     const html = `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: #2563eb; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
-          .content { background: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px; }
-          .otp-box { background: #2563eb; color: white; font-size: 32px; font-weight: bold; text-align: center; padding: 20px; border-radius: 8px; margin: 20px 0; letter-spacing: 8px; }
-          .warning { background: #fef3c7; border: 1px solid #f59e0b; padding: 15px; border-radius: 8px; margin-top: 20px; }
-          .footer { text-align: center; color: #6b7280; font-size: 12px; margin-top: 20px; }
+          body { margin: 0; padding: 0; background: #f4f6f8; color: #222; font-family: Arial, sans-serif; }
+          .container { max-width: 560px; margin: 0 auto; padding: 20px; }
+          .card { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
+          .header { background: #0f172a; color: #ffffff; padding: 16px 20px; font-size: 18px; font-weight: 600; }
+          .content { padding: 20px; line-height: 1.6; font-size: 14px; }
+          .otp-box { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; text-align: center; padding: 14px; margin: 16px 0; font-size: 30px; font-weight: 700; letter-spacing: 6px; color: #0f172a; }
+          .hint { color: #475569; font-size: 13px; }
+          .footer { color: #6b7280; font-size: 12px; padding: 16px 20px 20px; border-top: 1px solid #e5e7eb; }
         </style>
       </head>
       <body>
         <div class="container">
-          <div class="header">
-            <h1>🛡️ SafeZone</h1>
-          </div>
-          <div class="content">
-            <p>Xin chào${name ? ` <strong>${name}</strong>` : ''},</p>
-            <p>Bạn đã yêu cầu xác thực email cho tài khoản SafeZone. Đây là mã OTP của bạn:</p>
-            
-            <div class="otp-box">${otp}</div>
-            
-            <p>Mã này sẽ hết hạn sau <strong>10 phút</strong>.</p>
-            
-            <div class="warning">
-              ⚠️ <strong>Lưu ý:</strong> Không chia sẻ mã này với bất kỳ ai. Nhân viên SafeZone sẽ không bao giờ yêu cầu mã OTP của bạn.
+          <div class="card">
+            <div class="header">SafeZone</div>
+            <div class="content">
+              <p>Xin chao${name ? ` <strong>${name}</strong>` : ''},</p>
+              <p>Day la ma xac minh email cho tai khoan SafeZone cua ban:</p>
+              <div class="otp-box">${otp}</div>
+              <p>Ma co hieu luc trong <strong>10 phut</strong>.</p>
+              <p class="hint">Neu ban khong thuc hien yeu cau nay, vui long bo qua email.</p>
             </div>
-          </div>
-          <div class="footer">
-            <p>Email này được gửi tự động từ hệ thống SafeZone.</p>
-            <p>Nếu bạn không yêu cầu mã này, vui lòng bỏ qua email này.</p>
+            <div class="footer">
+              Email duoc gui tu dong boi he thong SafeZone. Vui long khong chia se ma cho nguoi khac.
+            </div>
           </div>
         </div>
       </body>
@@ -179,24 +146,28 @@ export class EmailService implements OnModuleInit {
     `;
 
     const text = `
-SafeZone - Mã xác thực OTP
+SafeZone - Ma xac minh email
 
-Xin chào${name ? ` ${name}` : ''},
+Xin chao${name ? ` ${name}` : ''},
 
-Mã OTP của bạn là: ${otp}
+Ma xac minh cua ban la: ${otp}
 
-Mã này sẽ hết hạn sau 10 phút.
+Ma co hieu luc trong 10 phut.
 
-Không chia sẻ mã này với bất kỳ ai.
+Khong chia se ma nay voi bat ky ai.
 
 ---
-Email này được gửi tự động từ hệ thống SafeZone.
+Email duoc gui tu dong boi he thong SafeZone.
     `;
 
     return this.sendEmail({ to: email, subject, html, text });
   }
 
-  async sendPasswordResetEmail(email: string, otp: string, name?: string): Promise<boolean> {
+  async sendPasswordResetEmail(
+    email: string,
+    otp: string,
+    name?: string,
+  ): Promise<boolean> {
     const subject = 'Đặt lại mật khẩu - SafeZone';
     const html = `
       <!DOCTYPE html>

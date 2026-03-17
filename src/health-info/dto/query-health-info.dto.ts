@@ -1,6 +1,9 @@
 import { IsOptional, IsEnum, IsString, IsNumber, Min } from 'class-validator';
 import { Type } from 'class-transformer';
-import { HealthInfoCategory, HealthInfoStatus } from '../entities/health-info.entity';
+import {
+  HealthInfoCategory,
+  HealthInfoStatus,
+} from '../entities/health-info.entity';
 
 export class QueryHealthInfoDto {
   @IsOptional()

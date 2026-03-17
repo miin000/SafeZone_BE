@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, IsNull, Or, Not } from 'typeorm';
+import { Repository, IsNull, Not } from 'typeorm';
 import { Notification, NotificationType } from './entities/notification.entity';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { PushService } from './push.service';
@@ -18,8 +18,12 @@ export class NotificationService {
     private pushService: PushService,
   ) {}
 
-  async create(createNotificationDto: CreateNotificationDto): Promise<Notification> {
-    const notification = this.notificationRepository.create(createNotificationDto);
+  async create(
+    createNotificationDto: CreateNotificationDto,
+  ): Promise<Notification> {
+    const notification = this.notificationRepository.create(
+      createNotificationDto,
+    );
     return this.notificationRepository.save(notification);
   }
 
@@ -41,9 +45,11 @@ export class NotificationService {
     await this.pushService.sendToTopic('all', {
       title,
       body,
-      data: data ? Object.fromEntries(
-        Object.entries(data).map(([k, v]) => [k, String(v)])
-      ) : undefined,
+      data: data
+        ? Object.fromEntries(
+            Object.entries(data).map(([k, v]) => [k, String(v)]),
+          )
+        : undefined,
     });
 
     return this.notificationRepository.save(notification);
@@ -71,9 +77,11 @@ export class NotificationService {
       await this.pushService.sendToDevice(user.fcmToken, {
         title,
         body,
-        data: data ? Object.fromEntries(
-          Object.entries(data).map(([k, v]) => [k, String(v)])
-        ) : undefined,
+        data: data
+          ? Object.fromEntries(
+              Object.entries(data).map(([k, v]) => [k, String(v)]),
+            )
+          : undefined,
       });
     }
 
@@ -137,7 +145,7 @@ export class NotificationService {
   // Get broadcast notification history for admin
   async findBroadcastHistory(): Promise<Notification[]> {
     return this.notificationRepository.find({
-      where: { isBroadcast: true },
+      where: [{ isBroadcast: true }, { userId: IsNull() }],
       order: { createdAt: 'DESC' },
       take: 50,
     });
@@ -163,7 +171,12 @@ export class NotificationService {
 
     // Also broadcast push notification
     if (zoneId) {
-      await this.pushService.sendEpidemicBroadcast(zoneName, diseaseType, riskLevel, zoneId);
+      await this.pushService.sendEpidemicBroadcast(
+        zoneName,
+        diseaseType,
+        riskLevel,
+        zoneId,
+      );
     }
   }
 
@@ -177,7 +190,9 @@ export class NotificationService {
   ): Promise<void> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user?.fcmToken) {
-      this.logger.warn(`User ${userId} has no FCM token, cannot send zone entry alert`);
+      this.logger.warn(
+        `User ${userId} has no FCM token, cannot send zone entry alert`,
+      );
       return;
     }
 
@@ -220,11 +235,16 @@ export class NotificationService {
     });
 
     const tokens = users
-      .filter(u => u.id !== authorId && u.fcmToken)
-      .map(u => u.fcmToken!);
+      .filter((u) => u.id !== authorId && u.fcmToken)
+      .map((u) => u.fcmToken);
 
     if (tokens.length > 0) {
-      await this.pushService.sendNewPostNotification(tokens, postTitle, authorName, postId);
+      await this.pushService.sendNewPostNotification(
+        tokens,
+        postTitle,
+        authorName,
+        postId,
+      );
     }
 
     // Save broadcast notification

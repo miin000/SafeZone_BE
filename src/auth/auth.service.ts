@@ -11,6 +11,7 @@ import * as bcrypt from 'bcrypt';
 import { User } from './entities/user.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { UserRole } from './entities/user.entity';
 import { EmailService } from '../notification/email.service';
 import { SmsService } from '../notification/sms.service';
 
@@ -24,14 +25,31 @@ export class AuthService {
     private smsService: SmsService,
   ) {}
 
-  async register(registerDto: RegisterDto): Promise<{ user: User; token: string }> {
-    const { email, password, name, phone } = registerDto;
+  async register(
+    registerDto: RegisterDto,
+  ): Promise<{ user: User; token: string }> {
+    const {
+      email,
+      password,
+      name,
+      phone,
+      gender,
+      dateOfBirth,
+      citizenId,
+      fullAddress,
+      province,
+      district,
+      ward,
+      consentGiven,
+    } = registerDto;
 
     // Normalize phone number
     const normalizedPhone = this.normalizePhoneNumber(phone);
 
     // Check if phone already exists
-    const existingPhoneUser = await this.userRepository.findOne({ where: { phone: normalizedPhone } });
+    const existingPhoneUser = await this.userRepository.findOne({
+      where: { phone: normalizedPhone },
+    });
     if (existingPhoneUser) {
       throw new ConflictException('Số điện thoại đã được sử dụng');
     }
@@ -39,7 +57,9 @@ export class AuthService {
     // Check if email already exists (if provided)
     const trimmedEmail = email?.trim() || undefined;
     if (trimmedEmail) {
-      const existingEmailUser = await this.userRepository.findOne({ where: { email: trimmedEmail } });
+      const existingEmailUser = await this.userRepository.findOne({
+        where: { email: trimmedEmail },
+      });
       if (existingEmailUser) {
         throw new ConflictException('Email đã được sử dụng');
       }
@@ -49,12 +69,21 @@ export class AuthService {
     const salt = await bcrypt.genSalt();
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Create user
+    // Create user with enhanced fields
     const user = this.userRepository.create({
       email: trimmedEmail,
       password: hashedPassword,
       name,
       phone: normalizedPhone,
+      gender,
+      dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
+      citizenId,
+      fullAddress,
+      province,
+      district,
+      ward,
+      consentGiven: consentGiven || false,
+      consentGivenAt: consentGiven ? new Date() : undefined,
     });
 
     await this.userRepository.save(user);
@@ -69,7 +98,7 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto): Promise<{ user: User; token: string }> {
-    const { phone, email, password } = loginDto;
+    const { phone, email, password, source } = loginDto;
 
     if (!phone && !email) {
       throw new UnauthorizedException('Phải cung cấp email hoặc số điện thoại');
@@ -86,10 +115,12 @@ export class AuthService {
     if (!user && phone) {
       // Normalize phone number
       const normalizedPhone = this.normalizePhoneNumber(phone);
-      
+
       // Find user by phone
-      user = await this.userRepository.findOne({ where: { phone: normalizedPhone } });
-      
+      user = await this.userRepository.findOne({
+        where: { phone: normalizedPhone },
+      });
+
       // Also try original phone if not found
       if (!user) {
         user = await this.userRepository.findOne({ where: { phone } });
@@ -97,13 +128,37 @@ export class AuthService {
     }
 
     if (!user) {
-      throw new UnauthorizedException('Email/Số điện thoại hoặc mật khẩu không đúng');
+      throw new UnauthorizedException(
+        'Email/Số điện thoại hoặc mật khẩu không đúng',
+      );
+    }
+
+    // Role-based access control: regular users cannot log into admin web
+    if (source === 'web' && user.role === UserRole.USER) {
+      throw new UnauthorizedException(
+        'Tài khoản người dùng không có quyền truy cập trang quản trị. Vui lòng sử dụng ứng dụng di động.',
+      );
+    }
+
+    // Check if user is blacklisted
+    if (user.isBlacklisted) {
+      throw new UnauthorizedException(
+        'Tài khoản của bạn đã bị khóa. Lý do: ' +
+          (user.blacklistReason || 'Vi phạm quy định'),
+      );
+    }
+
+    // Check if user is active
+    if (!user.isActive) {
+      throw new UnauthorizedException('Tài khoản của bạn đã bị vô hiệu hóa');
     }
 
     // Validate password
     const isPasswordValid = await bcrypt.compare(password, user.password!);
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Email/Số điện thoại hoặc mật khẩu không đúng');
+      throw new UnauthorizedException(
+        'Email/Số điện thoại hoặc mật khẩu không đúng',
+      );
     }
 
     // Update last login
@@ -135,10 +190,16 @@ export class AuthService {
     return user;
   }
 
-  async updateProfile(userId: string, updateData: Partial<User>): Promise<User> {
+  async updateProfile(userId: string, dto: Record<string, any>): Promise<User> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new UnauthorizedException('Người dùng không tồn tại');
+    }
+
+    // Convert dateOfBirth string to Date if present
+    const updateData: Partial<User> = { ...dto } as any;
+    if (dto.dateOfBirth && typeof dto.dateOfBirth === 'string') {
+      updateData.dateOfBirth = new Date(dto.dateOfBirth);
     }
 
     // Don't allow password update through this method
@@ -151,11 +212,13 @@ export class AuthService {
       const normalizedPhone = this.normalizePhoneNumber(updateData.phone);
       updateData.phone = normalizedPhone;
 
-      const existingUser = await this.userRepository.findOne({ 
-        where: { phone: normalizedPhone } 
+      const existingUser = await this.userRepository.findOne({
+        where: { phone: normalizedPhone },
       });
       if (existingUser && existingUser.id !== userId) {
-        throw new ConflictException('Số điện thoại đã được sử dụng bởi tài khoản khác');
+        throw new ConflictException(
+          'Số điện thoại đã được sử dụng bởi tài khoản khác',
+        );
       }
 
       // Reset phone verification when phone changes
@@ -197,7 +260,7 @@ export class AuthService {
       isEmailVerified: user.isEmailVerified,
       isPhoneVerified: user.isPhoneVerified,
       isFullyVerified: user.isEmailVerified && user.isPhoneVerified,
-      canReport: user.isPhoneVerified, // Only phone verification required for reporting
+      canReport: user.isEmailVerified && user.isPhoneVerified,
       email: user.email || null,
       phone: user.phone,
     };
@@ -214,10 +277,6 @@ export class AuthService {
       throw new BadRequestException('Chưa cập nhật email');
     }
 
-    if (user.isEmailVerified) {
-      throw new BadRequestException('Email đã được xác thực');
-    }
-
     const otp = this.generateOtp();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
@@ -226,24 +285,29 @@ export class AuthService {
     await this.userRepository.save(user);
 
     // Send email via email service
-    const emailSent = await this.emailService.sendOtpEmail(user.email, otp, user.name);
-    
+    const emailSent = await this.emailService.sendOtpEmail(
+      user.email,
+      otp,
+      user.name,
+    );
+
     if (!emailSent) {
-      throw new BadRequestException('Không thể gửi email. Vui lòng thử lại sau.');
+      throw new BadRequestException(
+        'Không thể gửi email. Vui lòng thử lại sau.',
+      );
     }
 
     return { message: 'Mã OTP đã được gửi đến email của bạn' };
   }
 
   // Verify Email OTP
-  async verifyEmailOtp(userId: string, otp: string): Promise<{ message: string; verified: boolean }> {
+  async verifyEmailOtp(
+    userId: string,
+    otp: string,
+  ): Promise<{ message: string; verified: boolean }> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new UnauthorizedException('Người dùng không tồn tại');
-    }
-
-    if (user.isEmailVerified) {
-      throw new BadRequestException('Email đã được xác thực');
     }
 
     if (!user.emailOtp || !user.emailOtpExpires) {
@@ -267,7 +331,9 @@ export class AuthService {
   }
 
   // Send Phone OTP via Twilio Verify
-  async sendPhoneOtp(userId: string): Promise<{ success: boolean; message: string }> {
+  async sendPhoneOtp(
+    userId: string,
+  ): Promise<{ success: boolean; message: string }> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new UnauthorizedException('Người dùng không tồn tại');
@@ -283,16 +349,22 @@ export class AuthService {
 
     // Use Twilio Verify API - it handles OTP generation and sending
     const result = await this.smsService.sendOtpSms(user.phone);
-    
+
     if (!result.success) {
       throw new BadRequestException(result.message);
     }
 
-    return { success: true, message: 'Mã OTP đã được gửi đến số điện thoại của bạn' };
+    return {
+      success: true,
+      message: 'Mã OTP đã được gửi đến số điện thoại của bạn',
+    };
   }
 
   // Verify Phone OTP via Twilio Verify
-  async verifyPhoneOtp(userId: string, otp: string): Promise<{ message: string; verified: boolean }> {
+  async verifyPhoneOtp(
+    userId: string,
+    otp: string,
+  ): Promise<{ message: string; verified: boolean }> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new UnauthorizedException('Người dùng không tồn tại');
@@ -308,7 +380,7 @@ export class AuthService {
 
     // Verify OTP via Twilio Verify API
     const result = await this.smsService.verifyOtp(user.phone, otp);
-    
+
     if (!result.success) {
       throw new BadRequestException(result.message);
     }
@@ -323,13 +395,20 @@ export class AuthService {
   }
 
   // Change Password
-  async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<{ message: string }> {
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{ message: string }> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new UnauthorizedException('Người dùng không tồn tại');
     }
 
-    const isPasswordValid = await bcrypt.compare(currentPassword, user.password!);
+    const isPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password!,
+    );
     if (!isPasswordValid) {
       throw new BadRequestException('Mật khẩu hiện tại không đúng');
     }
@@ -363,7 +442,11 @@ export class AuthService {
   }
 
   // Reset Password with OTP
-  async resetPassword(email: string, otp: string, newPassword: string): Promise<{ message: string }> {
+  async resetPassword(
+    email: string,
+    otp: string,
+    newPassword: string,
+  ): Promise<{ message: string }> {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) {
       throw new BadRequestException('Thông tin không hợp lệ');
@@ -394,17 +477,17 @@ export class AuthService {
   private normalizePhoneNumber(phone: string): string {
     // Remove all spaces and dashes
     let normalized = phone.replace(/[\s-]/g, '');
-    
+
     // If starts with 0, replace with +84 (Vietnam)
     if (normalized.startsWith('0')) {
       normalized = '+84' + normalized.substring(1);
     }
-    
+
     // If doesn't start with +, add +
     if (!normalized.startsWith('+')) {
       normalized = '+' + normalized;
     }
-    
+
     return normalized;
   }
 

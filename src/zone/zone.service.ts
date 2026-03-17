@@ -42,7 +42,11 @@ export class ZoneService {
     return zone;
   }
 
-  async findNearby(lat: number, lon: number, radiusKm: number = 10): Promise<EpidemicZone[]> {
+  async findNearby(
+    lat: number,
+    lon: number,
+    radiusKm: number = 10,
+  ): Promise<EpidemicZone[]> {
     return this.zoneRepository
       .createQueryBuilder('zone')
       .where(
@@ -74,7 +78,10 @@ export class ZoneService {
       .getMany();
   }
 
-  async update(id: string, updateZoneDto: UpdateZoneDto): Promise<EpidemicZone> {
+  async update(
+    id: string,
+    updateZoneDto: UpdateZoneDto,
+  ): Promise<EpidemicZone> {
     const zone = await this.findOne(id);
 
     if (updateZoneDto.lat !== undefined && updateZoneDto.lon !== undefined) {
@@ -127,7 +134,9 @@ export class ZoneService {
     totalCases: number;
   }> {
     const total = await this.zoneRepository.count();
-    const active = await this.zoneRepository.count({ where: { isActive: true } });
+    const active = await this.zoneRepository.count({
+      where: { isActive: true },
+    });
 
     const byRiskLevelRaw = await this.zoneRepository
       .createQueryBuilder('zone')

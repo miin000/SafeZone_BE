@@ -18,14 +18,21 @@ import { SmsService } from '../notification/sms.service';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET') || 'safezone-secret-key',
+        secret:
+          configService.get<string>('JWT_SECRET') || 'safezone-secret-key',
         signOptions: { expiresIn: '7d' },
       }),
       inject: [ConfigService],
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, LocalStrategy, EmailService, SmsService],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    LocalStrategy,
+    EmailService,
+    SmsService,
+  ],
   exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

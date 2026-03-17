@@ -43,14 +43,20 @@ export class PostService {
     if (queryDto.showAll) {
       // Admin can see all posts, optionally filter by status
       if (queryDto.status) {
-        queryBuilder.andWhere('post.status = :status', { status: queryDto.status });
+        queryBuilder.andWhere('post.status = :status', {
+          status: queryDto.status,
+        });
       }
     } else {
       // Default: only show approved posts for public
       if (queryDto.status) {
-        queryBuilder.andWhere('post.status = :status', { status: queryDto.status });
+        queryBuilder.andWhere('post.status = :status', {
+          status: queryDto.status,
+        });
       } else {
-        queryBuilder.andWhere('post.status = :status', { status: PostStatus.APPROVED });
+        queryBuilder.andWhere('post.status = :status', {
+          status: PostStatus.APPROVED,
+        });
       }
     }
 
@@ -61,7 +67,9 @@ export class PostService {
     }
 
     if (queryDto.userId) {
-      queryBuilder.andWhere('post.userId = :userId', { userId: queryDto.userId });
+      queryBuilder.andWhere('post.userId = :userId', {
+        userId: queryDto.userId,
+      });
     }
 
     const [data, total] = await queryBuilder
@@ -143,7 +151,11 @@ export class PostService {
     return this.postRepository.save(post);
   }
 
-  async remove(id: string, userId: string, isAdmin: boolean = false): Promise<void> {
+  async remove(
+    id: string,
+    userId: string,
+    isAdmin: boolean = false,
+  ): Promise<void> {
     const post = await this.findOne(id);
 
     if (!isAdmin && post.userId !== userId) {
@@ -157,7 +169,11 @@ export class PostService {
     postId: string,
     userId: string,
     type: ReactionType,
-  ): Promise<{ helpfulCount: number; notHelpfulCount: number; userReaction: ReactionType | null }> {
+  ): Promise<{
+    helpfulCount: number;
+    notHelpfulCount: number;
+    userReaction: ReactionType | null;
+  }> {
     const post = await this.findOne(postId);
 
     // Check existing reaction
@@ -169,7 +185,7 @@ export class PostService {
       if (existingReaction.type === type) {
         // Remove reaction (toggle off)
         await this.reactionRepository.remove(existingReaction);
-        
+
         // Update count
         if (type === ReactionType.HELPFUL) {
           post.helpfulCount = Math.max(0, post.helpfulCount - 1);
@@ -230,7 +246,10 @@ export class PostService {
     }
   }
 
-  async getUserReaction(postId: string, userId: string): Promise<ReactionType | null> {
+  async getUserReaction(
+    postId: string,
+    userId: string,
+  ): Promise<ReactionType | null> {
     const reaction = await this.reactionRepository.findOne({
       where: { postId, userId },
     });
@@ -239,9 +258,15 @@ export class PostService {
 
   async getStats() {
     const total = await this.postRepository.count();
-    const pending = await this.postRepository.count({ where: { status: PostStatus.PENDING } });
-    const approved = await this.postRepository.count({ where: { status: PostStatus.APPROVED } });
-    const rejected = await this.postRepository.count({ where: { status: PostStatus.REJECTED } });
+    const pending = await this.postRepository.count({
+      where: { status: PostStatus.PENDING },
+    });
+    const approved = await this.postRepository.count({
+      where: { status: PostStatus.APPROVED },
+    });
+    const rejected = await this.postRepository.count({
+      where: { status: PostStatus.REJECTED },
+    });
 
     return {
       total,

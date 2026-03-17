@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { AuditLog, AuditAction, AuditResource } from './entities/audit-log.entity';
+import {
+  AuditLog,
+  AuditAction,
+  AuditResource,
+} from './entities/audit-log.entity';
 
 export interface CreateAuditLogDto {
   userId: string;
@@ -58,15 +62,7 @@ export class AuditLogService {
     page?: number;
     limit?: number;
   }) {
-    const {
-      userId,
-      action,
-      resource,
-      from,
-      to,
-      page = 1,
-      limit = 50,
-    } = params;
+    const { userId, action, resource, from, to, page = 1, limit = 50 } = params;
 
     const query = this.auditLogRepository
       .createQueryBuilder('audit_log')
@@ -124,8 +120,7 @@ export class AuditLogService {
   async getStats(params: { from?: Date; to?: Date }) {
     const { from, to } = params;
 
-    const query = this.auditLogRepository
-      .createQueryBuilder('audit_log');
+    const query = this.auditLogRepository.createQueryBuilder('audit_log');
 
     if (from) {
       query.andWhere('audit_log.createdAt >= :from', { from });

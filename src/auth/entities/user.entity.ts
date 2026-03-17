@@ -39,6 +39,39 @@ export class User {
   })
   role: UserRole;
 
+  // Enhanced personal info
+  @Column({ nullable: true })
+  gender: string; // male, female, other
+
+  @Column({ type: 'date', nullable: true })
+  dateOfBirth: Date;
+
+  @Column({ nullable: true })
+  citizenId: string; // CCCD
+
+  // Address fields
+  @Column({ type: 'text', nullable: true })
+  fullAddress: string;
+
+  @Column({ nullable: true })
+  province: string;
+
+  @Column({ nullable: true })
+  district: string;
+
+  @Column({ nullable: true })
+  ward: string;
+
+  // Organization info (for health_authority)
+  @Column({ nullable: true })
+  organizationName: string;
+
+  @Column({ nullable: true })
+  organizationLevel: string; // commune, district, province, central
+
+  @Column({ type: 'text', nullable: true })
+  organizationAddress: string;
+
   @Column({ nullable: true })
   fcmToken: string;
 
@@ -63,6 +96,29 @@ export class User {
   @Column({ default: true })
   isActive: boolean;
 
+  // Anti-spam / reputation
+  @Column({ default: 100 })
+  reputationScore: number;
+
+  @Column({ default: 0 })
+  dailyReportCount: number;
+
+  @Column({ type: 'date', nullable: true })
+  lastReportDate: Date;
+
+  @Column({ default: false })
+  isBlacklisted: boolean;
+
+  @Column({ type: 'text', nullable: true })
+  blacklistReason: string;
+
+  // Consent
+  @Column({ default: false })
+  consentGiven: boolean;
+
+  @Column({ type: 'timestamp', nullable: true })
+  consentGivenAt: Date;
+
   @Column({ nullable: true })
   lastLoginAt: Date;
 
@@ -72,4 +128,3 @@ export class User {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-
