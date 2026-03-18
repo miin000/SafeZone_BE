@@ -389,11 +389,12 @@ export class GisService {
 
   async getStats(params: {
     diseaseType?: string;
+    regionName?: string;
     status?: string;
     from?: string;
     to?: string;
   }) {
-    const { diseaseType, status, from, to } = params;
+    const { diseaseType, regionName, status, from, to } = params;
 
     const where: string[] = [];
     const values: any[] = [];
@@ -401,6 +402,13 @@ export class GisService {
     if (diseaseType) {
       values.push(diseaseType);
       where.push(`c.disease_type = $${values.length}`);
+    }
+    if (regionName) {
+      values.push(regionName);
+      where.push(`(
+        c.admin_unit_text = $${values.length}
+        OR c.region_id IN (SELECT id FROM regions WHERE "TinhThanh" = $${values.length})
+      )`);
     }
     if (status) {
       values.push(status);

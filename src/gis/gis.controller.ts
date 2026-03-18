@@ -138,11 +138,18 @@ export class GisController {
   @Get('stats')
   getStats(
     @Query('diseaseType') diseaseType?: string,
+    @Query('regionName') regionName?: string,
     @Query('status') status?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
-    return this.gisService.getStats({ diseaseType, status, from, to });
+    return this.gisService.getStats({
+      diseaseType,
+      regionName,
+      status,
+      from,
+      to,
+    });
   }
 
   @Get('grid-density')

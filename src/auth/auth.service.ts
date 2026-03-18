@@ -113,17 +113,11 @@ export class AuthService {
 
     // If not found by email, try phone
     if (!user && phone) {
-      // Normalize phone number
-      const normalizedPhone = this.normalizePhoneNumber(phone);
-
-      // Find user by phone
-      user = await this.userRepository.findOne({
-        where: { phone: normalizedPhone },
-      });
-
-      // Also try original phone if not found
-      if (!user) {
-        user = await this.userRepository.findOne({ where: { phone } });
+      const candidates = this.buildPhoneCandidates(phone);
+      if (candidates.length > 0) {
+        user = await this.userRepository.findOne({
+          where: candidates.map((candidate) => ({ phone: candidate })),
+        });
       }
     }
 
@@ -489,6 +483,42 @@ export class AuthService {
     }
 
     return normalized;
+  }
+
+  private buildPhoneCandidates(phone: string): string[] {
+    const raw = (phone || '').trim();
+    if (!raw) return [];
+
+    const compact = raw.replace(/[\s-]/g, '');
+    const candidates = new Set<string>();
+
+    candidates.add(raw);
+    candidates.add(compact);
+
+    const normalized = this.normalizePhoneNumber(compact);
+    candidates.add(normalized);
+
+    if (compact.startsWith('+84') && compact.length > 3) {
+      candidates.add(`0${compact.substring(3)}`);
+      candidates.add(compact.substring(1)); // 84...
+    }
+
+    if (compact.startsWith('84') && compact.length > 2) {
+      candidates.add(`0${compact.substring(2)}`);
+      candidates.add(`+${compact}`);
+    }
+
+    if (compact.startsWith('0') && compact.length > 1) {
+      candidates.add(`84${compact.substring(1)}`);
+      candidates.add(`+84${compact.substring(1)}`);
+    }
+
+    if (normalized.startsWith('+84') && normalized.length > 3) {
+      candidates.add(`0${normalized.substring(3)}`);
+      candidates.add(normalized.substring(1));
+    }
+
+    return [...candidates].filter((v) => v.length > 0);
   }
 
   private generateToken(user: User): string {

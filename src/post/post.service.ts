@@ -37,6 +37,7 @@ export class PostService {
     const queryBuilder = this.postRepository
       .createQueryBuilder('post')
       .leftJoinAndSelect('post.user', 'user')
+      .distinct(true)
       .orderBy('post.createdAt', 'DESC');
 
     // If showAll is true (for admin), don't filter by status unless specified
@@ -98,8 +99,16 @@ export class PostService {
   async findByUser(userId: string) {
     const posts = await this.postRepository.find({
       where: { userId },
+      relations: ['user'],
       order: { createdAt: 'DESC' },
     });
+
+    posts.forEach((post) => {
+      if (post.user) {
+        delete post.user.password;
+      }
+    });
+
     return posts;
   }
 
