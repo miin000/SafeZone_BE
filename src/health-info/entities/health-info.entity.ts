@@ -20,8 +20,30 @@ export enum HealthInfoCategory {
 
 export enum HealthInfoStatus {
   DRAFT = 'draft',
+  REVIEWED = 'reviewed',
   PUBLISHED = 'published',
   ARCHIVED = 'archived',
+}
+
+export enum HealthInfoDiseaseType {
+  DENGUE = 'dengue',
+  COVID = 'covid',
+  FLU = 'flu',
+  GENERAL = 'general',
+}
+
+export enum HealthInfoTarget {
+  GENERAL = 'general',
+  CHILDREN = 'children',
+  ELDERLY = 'elderly',
+  PREGNANT = 'pregnant',
+}
+
+export enum HealthInfoSeverity {
+  LOW = 'low',
+  MEDIUM = 'medium',
+  HIGH = 'high',
+  EMERGENCY = 'emergency',
 }
 
 @Entity('health_info')
@@ -37,6 +59,18 @@ export class HealthInfo {
 
   @Column({ nullable: true })
   summary: string;
+
+  @Column({ default: HealthInfoDiseaseType.GENERAL })
+  @Index()
+  diseaseType: HealthInfoDiseaseType;
+
+  @Column({ default: HealthInfoTarget.GENERAL })
+  @Index()
+  target: HealthInfoTarget;
+
+  @Column({ default: HealthInfoSeverity.LOW })
+  @Index()
+  severityLevel: HealthInfoSeverity;
 
   @Column({
     type: 'enum',

@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, In } from 'typeorm';
+import { DataSource, Repository, In } from 'typeorm';
 import { HealthInfo, HealthInfoStatus } from './entities/health-info.entity';
 import {
   CreateHealthInfoDto,
@@ -9,11 +9,29 @@ import {
 } from './dto';
 
 @Injectable()
-export class HealthInfoService {
+export class HealthInfoService implements OnModuleInit {
   constructor(
     @InjectRepository(HealthInfo)
     private healthInfoRepository: Repository<HealthInfo>,
+    private dataSource: DataSource,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.dataSource.query(
+        `ALTER TYPE health_info_status_enum ADD VALUE IF NOT EXISTS 'reviewed'`,
+      );
+    } catch (_) {
+      // Ignore when enum does not exist in local/dev snapshots.
+    }
+
+    await this.dataSource.query(`
+      ALTER TABLE health_info
+      ADD COLUMN IF NOT EXISTS "diseaseType" VARCHAR(50) NOT NULL DEFAULT 'general',
+      ADD COLUMN IF NOT EXISTS "target" VARCHAR(50) NOT NULL DEFAULT 'general',
+      ADD COLUMN IF NOT EXISTS "severityLevel" VARCHAR(50) NOT NULL DEFAULT 'low'
+    `);
+  }
 
   async create(
     createDto: CreateHealthInfoDto,
@@ -31,6 +49,9 @@ export class HealthInfoService {
     const {
       category,
       status,
+      diseaseType,
+      target,
+      severityLevel,
       search,
       tag,
       page = 1,
@@ -51,6 +72,22 @@ export class HealthInfoService {
     // Filter by status
     if (status) {
       queryBuilder.andWhere('healthInfo.status = :status', { status });
+    }
+
+    if (diseaseType) {
+      queryBuilder.andWhere('healthInfo.diseaseType = :diseaseType', {
+        diseaseType,
+      });
+    }
+
+    if (target) {
+      queryBuilder.andWhere('healthInfo.target = :target', { target });
+    }
+
+    if (severityLevel) {
+      queryBuilder.andWhere('healthInfo.severityLevel = :severityLevel', {
+        severityLevel,
+      });
     }
 
     // Search in title, content, summary
@@ -98,16 +135,83 @@ export class HealthInfoService {
   }
 
   async findPublished(query: QueryHealthInfoDto) {
-    return this.findAll({
-      ...query,
-      status: HealthInfoStatus.PUBLISHED,
-    });
+    const { status, ...rest } = query;
+    if (status) {
+      return this.findAll({ ...rest, status });
+    }
+
+    const queryBuilder = this.healthInfoRepository
+      .createQueryBuilder('healthInfo')
+      .leftJoinAndSelect('healthInfo.author', 'author')
+      .where('healthInfo.status IN (:...statuses)', {
+        statuses: [HealthInfoStatus.REVIEWED, HealthInfoStatus.PUBLISHED],
+      })
+      .orderBy('healthInfo.publishedAt', 'DESC');
+
+    if (rest.category) {
+      queryBuilder.andWhere('healthInfo.category = :category', {
+        category: rest.category,
+      });
+    }
+    if (rest.diseaseType) {
+      queryBuilder.andWhere('healthInfo.diseaseType = :diseaseType', {
+        diseaseType: rest.diseaseType,
+      });
+    }
+    if (rest.target) {
+      queryBuilder.andWhere('healthInfo.target = :target', {
+        target: rest.target,
+      });
+    }
+    if (rest.severityLevel) {
+      queryBuilder.andWhere('healthInfo.severityLevel = :severityLevel', {
+        severityLevel: rest.severityLevel,
+      });
+    }
+    if (rest.search) {
+      queryBuilder.andWhere(
+        '(healthInfo.title ILIKE :search OR healthInfo.content ILIKE :search OR healthInfo.summary ILIKE :search)',
+        { search: `%${rest.search}%` },
+      );
+    }
+    if (rest.tag) {
+      queryBuilder.andWhere(':tag = ANY(healthInfo.tags)', { tag: rest.tag });
+    }
+
+    const page = rest.page ?? 1;
+    const limit = rest.limit ?? 10;
+    queryBuilder.skip((page - 1) * limit).take(limit);
+
+    let [items, total] = await queryBuilder.getManyAndCount();
+
+    // Bootstrap-friendly fallback: if no reviewed/published content exists yet,
+    // temporarily expose draft items so mobile does not appear empty.
+    if (total === 0 && !status) {
+      const fallback = await this.findAll({
+        ...rest,
+        status: HealthInfoStatus.DRAFT,
+        page,
+        limit,
+      });
+      items = fallback.items;
+      total = fallback.meta.total;
+    }
+
+    return {
+      items,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
   async findFeatured(limit: number = 5) {
     return this.healthInfoRepository.find({
       where: {
-        status: HealthInfoStatus.PUBLISHED,
+        status: In([HealthInfoStatus.REVIEWED, HealthInfoStatus.PUBLISHED]),
         isFeatured: true,
       },
       order: { publishedAt: 'DESC' },
@@ -120,7 +224,7 @@ export class HealthInfoService {
     return this.healthInfoRepository.find({
       where: {
         category: category as any,
-        status: HealthInfoStatus.PUBLISHED,
+        status: In([HealthInfoStatus.REVIEWED, HealthInfoStatus.PUBLISHED]),
       },
       order: { publishedAt: 'DESC' },
       take: limit,
@@ -145,7 +249,10 @@ export class HealthInfoService {
 
   async findOnePublished(id: string): Promise<HealthInfo> {
     const healthInfo = await this.healthInfoRepository.findOne({
-      where: { id, status: HealthInfoStatus.PUBLISHED },
+      where: {
+        id,
+        status: In([HealthInfoStatus.REVIEWED, HealthInfoStatus.PUBLISHED]),
+      },
       relations: ['author'],
     });
 

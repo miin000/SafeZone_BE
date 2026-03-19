@@ -10,6 +10,8 @@ import { PostReaction, ReactionType } from './entities/post-reaction.entity';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { QueryPostDto } from './dto/query-post.dto';
+import { NotificationService } from '../notification/notification.service';
+import { NotificationType } from '../notification/entities/notification.entity';
 
 @Injectable()
 export class PostService {
@@ -18,6 +20,7 @@ export class PostService {
     private postRepository: Repository<Post>,
     @InjectRepository(PostReaction)
     private reactionRepository: Repository<PostReaction>,
+    private notificationService: NotificationService,
   ) {}
 
   async create(userId: string, createPostDto: CreatePostDto): Promise<Post> {
@@ -157,7 +160,33 @@ export class PostService {
     if (adminNote) {
       post.adminNote = adminNote;
     }
-    return this.postRepository.save(post);
+    const updated = await this.postRepository.save(post);
+
+    // Notify post owner when moderation status changes.
+    if (status === PostStatus.APPROVED || status === PostStatus.REJECTED) {
+      const title =
+        status === PostStatus.APPROVED
+          ? 'Bài viết đã được duyệt'
+          : 'Bài viết đã bị từ chối';
+
+      const body =
+        status === PostStatus.APPROVED
+          ? 'Bài viết của bạn đã được phê duyệt và hiển thị công khai.'
+          : `Bài viết của bạn đã bị từ chối.${adminNote ? ` Lý do: ${adminNote}` : ''}`;
+
+      await this.notificationService.sendToUser(
+        post.userId,
+        title,
+        body,
+        NotificationType.REPORT_UPDATE,
+        {
+          postId: post.id,
+          status,
+        },
+      );
+    }
+
+    return updated;
   }
 
   async remove(

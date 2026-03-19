@@ -33,6 +33,16 @@ export class GisService {
     private readonly dataSource: DataSource,
   ) {}
 
+  private normalizeStatusForDb(status?: string) {
+    if (!status) return status;
+    return status === 'deceased' ? 'died' : status;
+  }
+
+  private normalizeStatusForApi(status?: string) {
+    if (!status) return status;
+    return status === 'died' ? 'deceased' : status;
+  }
+
   async getRegionsGeoJSON() {
     const [row] = await this.dataSource.query(`
       SELECT jsonb_build_object(
@@ -67,7 +77,7 @@ export class GisService {
       where.push(`c.disease_type = $${values.length}`);
     }
     if (status) {
-      values.push(status);
+      values.push(this.normalizeStatusForDb(status));
       where.push(`c.status = $${values.length}`);
     }
     if (from) {
@@ -93,7 +103,7 @@ export class GisService {
               'id', c.id,
               'external_id', c.external_id,
               'disease_type', c.disease_type,
-              'status', c.status,
+              'status', CASE WHEN c.status = 'died' THEN 'deceased' ELSE c.status END,
               'reported_time', c.reported_time,
               'region_id', c.region_id,
               'severity', c.severity,
@@ -125,7 +135,7 @@ export class GisService {
       c.id,
       c.external_id,
       c.disease_type,
-      c.status,
+      CASE WHEN c.status = 'died' THEN 'deceased' ELSE c.status END AS status,
       c.severity,
       c.reported_time,
       c.region_id,
@@ -177,7 +187,7 @@ export class GisService {
       where.push(`c.disease_type = $${values.length}`);
     }
     if (status) {
-      values.push(status);
+      values.push(this.normalizeStatusForDb(status));
       where.push(`c.status = $${values.length}`);
     }
     if (from) {
@@ -211,7 +221,7 @@ export class GisService {
         c.id,
         c.external_id,
         c.disease_type,
-        c.status,
+        CASE WHEN c.status = 'died' THEN 'deceased' ELSE c.status END AS status,
         c.severity,
         c.reported_time,
         c.region_id,
@@ -255,6 +265,8 @@ export class GisService {
       notes,
     } = dto;
 
+    const dbStatus = this.normalizeStatusForDb(status);
+
     const [result] = await this.dataSource.query(
       `
       WITH inserted AS (
@@ -278,7 +290,7 @@ export class GisService {
       `,
       [
         disease_type,
-        status,
+        dbStatus,
         severity,
         reported_time,
         lon,
@@ -291,7 +303,10 @@ export class GisService {
       ],
     );
 
-    return result;
+    return {
+      ...result,
+      status: this.normalizeStatusForApi(result.status),
+    };
   }
 
   async updateCase(id: string, dto: Partial<CaseDto>) {
@@ -308,7 +323,8 @@ export class GisService {
 
     if (dto.disease_type !== undefined)
       updates.push(`disease_type = ${push(dto.disease_type)}`);
-    if (dto.status !== undefined) updates.push(`status = ${push(dto.status)}`);
+    if (dto.status !== undefined)
+      updates.push(`status = ${push(this.normalizeStatusForDb(dto.status))}`);
     if (dto.severity !== undefined)
       updates.push(`severity = ${push(dto.severity)}`);
 
@@ -411,7 +427,7 @@ export class GisService {
       )`);
     }
     if (status) {
-      values.push(status);
+      values.push(this.normalizeStatusForDb(status));
       where.push(`c.status = $${values.length}`);
     }
     if (from) {
@@ -484,10 +500,10 @@ export class GisService {
     // Theo status
     const byStatus = await this.dataSource.query(
       `
-      SELECT c.status, COUNT(*)::int AS total
+      SELECT CASE WHEN c.status = 'died' THEN 'deceased' ELSE c.status END AS status, COUNT(*)::int AS total
       FROM cases c
       ${whereSql}
-      GROUP BY c.status
+      GROUP BY CASE WHEN c.status = 'died' THEN 'deceased' ELSE c.status END
       ORDER BY total DESC;
       `,
       values,
@@ -588,7 +604,7 @@ export class GisService {
       where.push(`c.disease_type = $${values.length}`);
     }
     if (status) {
-      values.push(status);
+      values.push(this.normalizeStatusForDb(status));
       where.push(`c.status = $${values.length}`);
     }
     if (from) {
@@ -712,7 +728,9 @@ export class GisService {
         avgSeverity: cell.avg_severity,
         maxSeverity: cell.max_severity,
         diseases: cell.diseases,
-        statuses: cell.statuses,
+        statuses: Array.isArray(cell.statuses)
+          ? cell.statuses.map((s: string) => this.normalizeStatusForApi(s))
+          : cell.statuses,
         riskScore,
         riskLevel,
       };
@@ -761,7 +779,7 @@ export class GisService {
       where.push(`c.disease_type = $${values.length}`);
     }
     if (status) {
-      values.push(status);
+      values.push(this.normalizeStatusForDb(status));
       where.push(`c.status = $${values.length}`);
     }
     if (from) {
@@ -839,7 +857,9 @@ export class GisService {
           combined: clusterSeverity,
         },
         diseases: cluster.diseases,
-        statuses: cluster.statuses,
+        statuses: Array.isArray(cluster.statuses)
+          ? cluster.statuses.map((s: string) => this.normalizeStatusForApi(s))
+          : cluster.statuses,
         timeRange: {
           earliest: cluster.earliest_case,
           latest: cluster.latest_case,

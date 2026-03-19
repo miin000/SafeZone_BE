@@ -19,6 +19,7 @@ import { QueryReportDto } from './dto/query-report.dto';
 import { NotificationService } from '../notification/notification.service';
 import { NotificationType } from '../notification/entities/notification.entity';
 import { GisService } from '../gis/gis.service';
+import { ZoneService } from '../zone/zone.service';
 
 @Injectable()
 export class ReportService {
@@ -30,6 +31,7 @@ export class ReportService {
     private notificationService: NotificationService,
     @Inject(forwardRef(() => GisService))
     private gisService: GisService,
+    private zoneService: ZoneService,
   ) {}
 
   // Log status change to audit trail
@@ -138,6 +140,27 @@ export class ReportService {
         coordinates: [lon, lat],
       },
     };
+
+    if (
+      createReportDto.hasSimilarCasesNearby === undefined ||
+      createReportDto.estimatedNearbyCount === undefined
+    ) {
+      try {
+        const zones = await this.zoneService.checkPointInZone(lat, lon);
+        if (createReportDto.hasSimilarCasesNearby === undefined) {
+          reportData.hasSimilarCasesNearby = zones.length > 0;
+        }
+        if (createReportDto.estimatedNearbyCount === undefined) {
+          reportData.estimatedNearbyCount = zones.reduce(
+            (sum, zone) => sum + (zone.caseCount || 0),
+            0,
+          );
+        }
+      } catch (error) {
+        // Keep report creation resilient even if zone lookup fails.
+        console.error('Failed to derive zone proximity for report:', error);
+      }
+    }
 
     // Store reporter's location if provided
     if (reporterLat !== undefined && reporterLon !== undefined) {

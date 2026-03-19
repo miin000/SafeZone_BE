@@ -7,6 +7,7 @@ import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
 import { GisModule } from '../gis/gis.module';
 import { AdminModule } from '../admin/admin.module';
+import { ZoneModule } from '../zone/zone.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { AdminModule } from '../admin/admin.module';
     AuthModule,
     NotificationModule,
     AdminModule,
+    ZoneModule,
     forwardRef(() => GisModule),
   ],
   controllers: [ReportController],

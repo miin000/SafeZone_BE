@@ -25,8 +25,8 @@ export class Disease {
   description: string;
 
   @Column({
-    type: 'enum',
-    enum: DiseaseRiskLevel,
+    name: 'risk_level',
+    type: 'varchar',
     default: DiseaseRiskLevel.MEDIUM,
   })
   riskLevel: DiseaseRiskLevel;
@@ -36,16 +36,16 @@ export class Disease {
   aliases: string;
 
   // ICD-10 code if available
-  @Column({ nullable: true })
+  @Column({ name: 'icd_code', nullable: true })
   icdCode: string;
 
   // Whether this disease is active/enabled
-  @Column({ default: true })
+  @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 }

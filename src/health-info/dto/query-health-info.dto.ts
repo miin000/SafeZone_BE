@@ -3,6 +3,9 @@ import { Type } from 'class-transformer';
 import {
   HealthInfoCategory,
   HealthInfoStatus,
+  HealthInfoDiseaseType,
+  HealthInfoTarget,
+  HealthInfoSeverity,
 } from '../entities/health-info.entity';
 
 export class QueryHealthInfoDto {
@@ -13,6 +16,18 @@ export class QueryHealthInfoDto {
   @IsOptional()
   @IsEnum(HealthInfoStatus)
   status?: HealthInfoStatus;
+
+  @IsOptional()
+  @IsEnum(HealthInfoDiseaseType)
+  diseaseType?: HealthInfoDiseaseType;
+
+  @IsOptional()
+  @IsEnum(HealthInfoTarget)
+  target?: HealthInfoTarget;
+
+  @IsOptional()
+  @IsEnum(HealthInfoSeverity)
+  severityLevel?: HealthInfoSeverity;
 
   @IsOptional()
   @IsString()

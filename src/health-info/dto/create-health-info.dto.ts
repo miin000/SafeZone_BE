@@ -7,7 +7,12 @@ import {
   IsUrl,
   MinLength,
 } from 'class-validator';
-import { HealthInfoCategory } from '../entities/health-info.entity';
+import {
+  HealthInfoCategory,
+  HealthInfoDiseaseType,
+  HealthInfoTarget,
+  HealthInfoSeverity,
+} from '../entities/health-info.entity';
 
 export class CreateHealthInfoDto {
   @IsString()
@@ -24,6 +29,18 @@ export class CreateHealthInfoDto {
 
   @IsEnum(HealthInfoCategory)
   category: HealthInfoCategory;
+
+  @IsOptional()
+  @IsEnum(HealthInfoDiseaseType)
+  diseaseType?: HealthInfoDiseaseType;
+
+  @IsOptional()
+  @IsEnum(HealthInfoTarget)
+  target?: HealthInfoTarget;
+
+  @IsOptional()
+  @IsEnum(HealthInfoSeverity)
+  severityLevel?: HealthInfoSeverity;
 
   @IsOptional()
   @IsUrl()

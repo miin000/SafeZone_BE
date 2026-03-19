@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { EpidemicZone, RiskLevel } from './entities/epidemic-zone.entity';
 import { CreateZoneDto } from './dto/create-zone.dto';
 import { UpdateZoneDto } from './dto/update-zone.dto';
@@ -10,7 +10,33 @@ export class ZoneService {
   constructor(
     @InjectRepository(EpidemicZone)
     private zoneRepository: Repository<EpidemicZone>,
+    private dataSource: DataSource,
   ) {}
+
+  private async syncCaseCountsFromReports(): Promise<void> {
+    await this.dataSource.query(
+      `
+      UPDATE epidemic_zones z
+      SET "caseCount" = COALESCE(sub.count, 0)
+      FROM (
+        SELECT
+          z2.id,
+          COUNT(r.id)::int AS count
+        FROM epidemic_zones z2
+        LEFT JOIN reports r
+          ON r.location IS NOT NULL
+          AND r.status <> 'rejected'
+          AND ST_DWithin(
+            z2.center::geography,
+            r.location::geography,
+            z2."radiusKm" * 1000
+          )
+        GROUP BY z2.id
+      ) sub
+      WHERE z.id = sub.id
+      `,
+    );
+  }
 
   async create(createZoneDto: CreateZoneDto): Promise<EpidemicZone> {
     const { lat, lon, ...rest } = createZoneDto;
@@ -27,6 +53,7 @@ export class ZoneService {
   }
 
   async findAll(onlyActive: boolean = true): Promise<EpidemicZone[]> {
+    await this.syncCaseCountsFromReports();
     const where = onlyActive ? { isActive: true } : {};
     return this.zoneRepository.find({
       where,
@@ -133,6 +160,7 @@ export class ZoneService {
     byRiskLevel: Record<RiskLevel, number>;
     totalCases: number;
   }> {
+    await this.syncCaseCountsFromReports();
     const total = await this.zoneRepository.count();
     const active = await this.zoneRepository.count({
       where: { isActive: true },
