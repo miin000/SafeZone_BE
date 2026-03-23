@@ -191,6 +191,9 @@ export class GisController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('clusterDistance') clusterDistance?: string,
+    @Query('clusterDistanceKm') clusterDistanceKm?: string,
+    @Query('minPoints') minPoints?: string,
+    @Query('includeNoise') includeNoise?: string,
   ) {
     return this.gisService.getClusteredCases({
       diseaseType,
@@ -198,6 +201,11 @@ export class GisController {
       from,
       to,
       clusterDistance: clusterDistance ? parseFloat(clusterDistance) : 0.05,
+      clusterDistanceKm: clusterDistanceKm
+        ? parseFloat(clusterDistanceKm)
+        : undefined,
+      minPoints: minPoints ? parseInt(minPoints, 10) : 4,
+      includeNoise: includeNoise === '1' || includeNoise === 'true',
     });
   }
 

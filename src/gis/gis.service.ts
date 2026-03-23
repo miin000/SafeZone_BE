@@ -767,9 +767,21 @@ export class GisService {
     status?: string;
     from?: string;
     to?: string;
-    clusterDistance?: number; // Distance in degrees for clustering (default 0.05 ~ 5km)
+    clusterDistance?: number; // Legacy: distance in degrees
+    clusterDistanceKm?: number; // Preferred: distance in kilometers
+    minPoints?: number;
+    includeNoise?: boolean;
   }) {
-    const { diseaseType, status, from, to, clusterDistance = 0.05 } = params;
+    const {
+      diseaseType,
+      status,
+      from,
+      to,
+      clusterDistance = 0.05,
+      clusterDistanceKm,
+      minPoints = 4,
+      includeNoise = false,
+    } = params;
 
     const where: string[] = [];
     const values: any[] = [];
@@ -792,23 +804,60 @@ export class GisService {
     }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    values.push(clusterDistance);
+
+    const safeMinPoints = Number.isFinite(minPoints)
+      ? Math.max(1, Math.floor(minPoints))
+      : 4;
+    const epsDegrees =
+      typeof clusterDistanceKm === 'number' && Number.isFinite(clusterDistanceKm)
+        ? Math.max(clusterDistanceKm, 0.001) / 111
+        : Math.max(clusterDistance, 0.0001);
+    const epsKmApprox = epsDegrees * 111;
+
+    values.push(epsDegrees);
     const distParam = `$${values.length}`;
+    values.push(safeMinPoints);
+    const minPointsParam = `$${values.length}`;
 
     // Use ST_ClusterDBSCAN for spatial clustering
     const clusters = await this.dataSource.query(
       `
-      WITH clustered AS (
+      WITH filtered AS (
         SELECT
           c.id,
           c.disease_type,
           c.status,
           COALESCE(c.severity, 1) AS severity,
           c.geom,
-          c.reported_time,
-          ST_ClusterDBSCAN(c.geom::geometry, eps := ${distParam}, minpoints := 1) OVER () AS cluster_id
+          c.reported_time
         FROM cases c
         ${whereSql}
+      ),
+      clustered AS (
+        SELECT
+          f.*,
+          ST_ClusterDBSCAN(
+            f.geom::geometry,
+            eps := ${distParam},
+            minpoints := ${minPointsParam}
+          ) OVER () AS cluster_id
+        FROM filtered f
+      ),
+      classified AS (
+        SELECT
+          a.*,
+          n.neighbor_count,
+          CASE
+            WHEN a.cluster_id IS NULL THEN 'noise'
+            WHEN n.neighbor_count >= ${minPointsParam} THEN 'core'
+            ELSE 'border'
+          END AS point_type
+        FROM clustered a
+        JOIN LATERAL (
+          SELECT COUNT(*)::int AS neighbor_count
+          FROM clustered b
+          WHERE ST_DWithin(a.geom::geometry, b.geom::geometry, ${distParam})
+        ) n ON TRUE
       )
       SELECT
         cluster_id,
@@ -818,26 +867,119 @@ export class GisService {
         SUM(severity)::int AS total_severity,
         ROUND(AVG(severity)::numeric, 2)::float AS avg_severity,
         MAX(severity)::int AS max_severity,
+        COUNT(*) FILTER (WHERE point_type = 'core')::int AS core_count,
+        COUNT(*) FILTER (WHERE point_type = 'border')::int AS border_count,
+        MIN(neighbor_count)::int AS min_neighbors,
+        MAX(neighbor_count)::int AS max_neighbors,
         ARRAY_AGG(DISTINCT disease_type) AS diseases,
         ARRAY_AGG(DISTINCT status) AS statuses,
         MIN(reported_time) AS earliest_case,
         MAX(reported_time) AS latest_case
-      FROM clustered
+      FROM classified
+      WHERE cluster_id IS NOT NULL
       GROUP BY cluster_id
       ORDER BY count DESC
       `,
       values,
     );
 
-    // Calculate cluster severity based on count and individual severities
-    const processedClusters = clusters.map((cluster: any) => {
-      // Combined severity considers both count and average severity
-      const combinedScore = cluster.count * (cluster.avg_severity || 1);
-      let clusterSeverity: number;
+    const [noiseSummary] = await this.dataSource.query(
+      `
+      WITH filtered AS (
+        SELECT
+          c.id,
+          c.disease_type,
+          c.status,
+          COALESCE(c.severity, 1) AS severity,
+          c.geom,
+          c.reported_time
+        FROM cases c
+        ${whereSql}
+      ),
+      clustered AS (
+        SELECT
+          f.*,
+          ST_ClusterDBSCAN(
+            f.geom::geometry,
+            eps := ${distParam},
+            minpoints := ${minPointsParam}
+          ) OVER () AS cluster_id
+        FROM filtered f
+      )
+      SELECT
+        COUNT(*) FILTER (WHERE cluster_id IS NULL)::int AS noise_count,
+        COUNT(*)::int AS total_points
+      FROM clustered
+      `,
+      values,
+    );
 
-      if (combinedScore >= 15 || cluster.max_severity >= 3) {
+    const noisePoints = includeNoise
+      ? await this.dataSource.query(
+          `
+          WITH filtered AS (
+            SELECT
+              c.id,
+              c.disease_type,
+              c.status,
+              COALESCE(c.severity, 1) AS severity,
+              c.geom,
+              c.reported_time
+            FROM cases c
+            ${whereSql}
+          ),
+          clustered AS (
+            SELECT
+              f.*,
+              ST_ClusterDBSCAN(
+                f.geom::geometry,
+                eps := ${distParam},
+                minpoints := ${minPointsParam}
+              ) OVER () AS cluster_id
+            FROM filtered f
+          )
+          SELECT
+            id,
+            disease_type,
+            CASE WHEN status = 'died' THEN 'deceased' ELSE status END AS status,
+            severity,
+            reported_time,
+            ST_Y(geom::geometry)::float AS lat,
+            ST_X(geom::geometry)::float AS lon
+          FROM clustered
+          WHERE cluster_id IS NULL
+          ORDER BY reported_time DESC
+          LIMIT 300
+          `,
+          values,
+        )
+      : [];
+
+    // Calculate cluster severity with density-first logic.
+    // Goal: a sparse cluster should not be marked high only because of a single severe case.
+    const processedClusters = clusters.map((cluster: any) => {
+      const count = Number(cluster.count || 0);
+      const avgSeverity = Number(cluster.avg_severity || 1);
+      const coreCount = Number(cluster.core_count || 0);
+
+      // Density score: count (primary) + core ratio (secondary)
+      // Range approx 1..3
+      const countScore = Math.min(3, count / 4);
+      const coreRatio = count > 0 ? coreCount / count : 0;
+      const coreRatioScore = Math.min(3, 1 + coreRatio * 2);
+      const densityScore = 0.7 * countScore + 0.3 * coreRatioScore;
+
+      // Clinical score: average severity (not max severity)
+      // Using avg avoids a single outlier case dominating the entire cluster.
+      const clinicalScore = Math.min(3, Math.max(1, avgSeverity));
+
+      // Final score is density-first.
+      const severityScore = 0.75 * densityScore + 0.25 * clinicalScore;
+
+      let clusterSeverity: number;
+      if (count >= 8 && severityScore >= 2.35) {
         clusterSeverity = 3; // High
-      } else if (combinedScore >= 5 || cluster.avg_severity >= 2) {
+      } else if (count >= 3 && severityScore >= 1.6) {
         clusterSeverity = 2; // Medium
       } else {
         clusterSeverity = 1; // Low
@@ -855,11 +997,22 @@ export class GisService {
           average: cluster.avg_severity,
           max: cluster.max_severity,
           combined: clusterSeverity,
+          score: Number(severityScore.toFixed(3)),
         },
         diseases: cluster.diseases,
         statuses: Array.isArray(cluster.statuses)
           ? cluster.statuses.map((s: string) => this.normalizeStatusForApi(s))
           : cluster.statuses,
+        dbscan: {
+          pointTypeSummary: {
+            core: cluster.core_count,
+            border: cluster.border_count,
+          },
+          neighbors: {
+            min: cluster.min_neighbors,
+            max: cluster.max_neighbors,
+          },
+        },
         timeRange: {
           earliest: cluster.earliest_case,
           latest: cluster.latest_case,
@@ -868,13 +1021,22 @@ export class GisService {
     });
 
     return {
-      clusterDistance,
+      algorithm: 'DBSCAN',
+      parameters: {
+        epsDegrees,
+        epsKmApprox,
+        minPoints: safeMinPoints,
+        includeNoise,
+      },
       totalClusters: processedClusters.length,
-      totalCases: processedClusters.reduce(
+      totalCasesInClusters: processedClusters.reduce(
         (sum: number, c: any) => sum + c.count,
         0,
       ),
+      noiseCount: noiseSummary?.noise_count ?? 0,
+      totalCases: noiseSummary?.total_points ?? 0,
       clusters: processedClusters,
+      noisePoints,
     };
   }
 
