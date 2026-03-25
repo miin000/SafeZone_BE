@@ -356,7 +356,7 @@ export class ReportService {
     confirmerRole: string,
     classification: 'suspected' | 'probable' | 'confirmed' | 'false_alarm',
     note?: string,
-    createCase?: boolean,
+    _createCase?: boolean,
   ): Promise<{ report: Report; case?: any }> {
     const report = await this.findOne(reportId);
 
@@ -369,7 +369,8 @@ export class ReportService {
     if (classification === 'false_alarm') {
       report.status = ReportStatus.REJECTED;
     } else {
-      report.status = ReportStatus.CONFIRMED;
+      // Keep approved reports in publication queue until official publishing flow is completed.
+      report.status = ReportStatus.PENDING;
     }
 
     const updatedReport = await this.reportRepository.save(report);
@@ -384,34 +385,7 @@ export class ReportService {
       { classification },
     );
 
-    let createdCase;
-    // Create GIS case for confirmed cases
-    if (classification === 'confirmed' && createCase) {
-      try {
-        const lat = report.location?.coordinates?.[1];
-        const lon = report.location?.coordinates?.[0];
-
-        createdCase = await this.gisService.createCase({
-          disease_type: report.diseaseType,
-          status: 'confirmed',
-          severity:
-            report.severityLevel === 'critical'
-              ? 4
-              : report.severityLevel === 'high'
-                ? 3
-                : 2,
-          reported_time: report.createdAt.toISOString(),
-          lat,
-          lon,
-          patient_name: report.patientInfo?.fullName,
-          patient_age: report.patientInfo?.age,
-          patient_gender: report.patientInfo?.gender,
-          notes: `Từ báo cáo #${report.id}. Phân loại: ${classification}. ${report.description || ''}`,
-        });
-      } catch (error) {
-        console.error('Failed to create case from report:', error);
-      }
-    }
+    const createdCase = undefined;
 
     const classLabels = {
       suspected: 'Nghi ngờ',
@@ -423,7 +397,9 @@ export class ReportService {
     await this.notificationService.sendToUser(
       report.userId,
       `Kết quả xác nhận chính thức: ${classLabels[classification]}`,
-      `Báo cáo về ${report.diseaseType} đã được xác nhận chính thức: ${classLabels[classification]}.${note ? ` Ghi chú: ${note}` : ''}`,
+      classification === 'false_alarm'
+        ? `Báo cáo về ${report.diseaseType} được xác nhận là báo động giả.${note ? ` Ghi chú: ${note}` : ''}`
+        : `Báo cáo về ${report.diseaseType} đã qua duyệt và đang ở hàng chờ công bố chính thức.${note ? ` Ghi chú: ${note}` : ''}`,
       NotificationType.REPORT_UPDATE,
       { reportId, status: report.status, classification },
     );
@@ -588,13 +564,13 @@ export class ReportService {
       )
       .andWhere('report.status IN (:...statuses)', {
         statuses: [
-          ReportStatus.SUBMITTED,
-          ReportStatus.AUTO_VERIFIED,
-          ReportStatus.UNDER_REVIEW,
           ReportStatus.CONFIRMED,
           ReportStatus.PENDING,
           ReportStatus.VERIFIED,
         ],
+      })
+      .andWhere('report.reportType = :reportType', {
+        reportType: 'case_report',
       })
       .orderBy('report.createdAt', 'DESC')
       .getMany();
@@ -629,12 +605,16 @@ export class ReportService {
     adminId: string,
     status: ReportStatus,
     adminNote?: string,
-    createCase?: boolean,
+    _createCase?: boolean,
   ): Promise<{ report: Report; case?: any }> {
     const report = await this.findOne(id);
 
     const previousStatus = report.status;
-    report.status = status;
+    if (status === ReportStatus.VERIFIED || status === ReportStatus.CONFIRMED) {
+      report.status = ReportStatus.PENDING;
+    } else {
+      report.status = status;
+    }
     if (adminNote !== undefined) {
       report.adminNote = adminNote;
     }
@@ -646,48 +626,23 @@ export class ReportService {
     await this.logStatusChange(
       id,
       previousStatus,
-      status,
+      report.status,
       adminId,
       'admin',
       adminNote,
     );
 
-    let createdCase;
-
-    if (
-      (status === ReportStatus.VERIFIED || status === ReportStatus.CONFIRMED) &&
-      createCase
-    ) {
-      try {
-        const lat = report.location?.coordinates?.[1];
-        const lon = report.location?.coordinates?.[0];
-
-        createdCase = await this.gisService.createCase({
-          disease_type: report.diseaseType,
-          status: 'confirmed',
-          severity: 2,
-          reported_time: report.createdAt.toISOString(),
-          lat,
-          lon,
-          patient_name: report.patientInfo?.fullName,
-          patient_age: report.patientInfo?.age,
-          patient_gender: report.patientInfo?.gender,
-          notes: `Từ báo cáo #${report.id}. ${report.description || ''}`,
-        });
-      } catch (error) {
-        console.error('Failed to create case from report:', error);
-      }
-    }
+    const createdCase = undefined;
 
     if (report.userId) {
       const statusMessages = {
         [ReportStatus.VERIFIED]: {
           title: 'Báo cáo đã được xác minh',
-          body: `Báo cáo của bạn về ${report.diseaseType} đã được cơ quan y tế xác minh.`,
+          body: `Báo cáo của bạn về ${report.diseaseType} đã được duyệt và đang chờ công bố chính thức.`,
         },
         [ReportStatus.CONFIRMED]: {
           title: 'Báo cáo đã được xác nhận',
-          body: `Báo cáo của bạn về ${report.diseaseType} đã được xác nhận chính thức.`,
+          body: `Báo cáo của bạn về ${report.diseaseType} đã được duyệt và đang chờ công bố chính thức.`,
         },
         [ReportStatus.REJECTED]: {
           title: 'Báo cáo không được chấp nhận',
@@ -710,7 +665,7 @@ export class ReportService {
           message.title,
           message.body,
           NotificationType.REPORT_UPDATE,
-          { reportId: id, status, diseaseType: report.diseaseType },
+          { reportId: id, status: report.status, diseaseType: report.diseaseType },
         );
       }
     }

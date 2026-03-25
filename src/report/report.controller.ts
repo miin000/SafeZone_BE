@@ -199,7 +199,6 @@ export class ReportController {
       req.user.role,
       dto.classification,
       dto.note,
-      dto.createCase,
     );
 
     this.auditLogService.log(
@@ -213,7 +212,7 @@ export class ReportController {
       {
         classification: dto.classification,
         note: dto.note,
-        createCase: dto.createCase,
+        publicationQueue: dto.classification !== 'false_alarm',
       },
     );
 

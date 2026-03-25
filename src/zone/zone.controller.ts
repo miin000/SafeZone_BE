@@ -126,7 +126,7 @@ export class ZoneController {
 
   @Delete(':id')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
   async remove(@Param('id') id: string) {
     return this.zoneService.remove(id);
   }

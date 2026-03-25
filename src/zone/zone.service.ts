@@ -21,14 +21,14 @@ export class ZoneService {
       FROM (
         SELECT
           z2.id,
-          COUNT(r.id)::int AS count
+          COUNT(c.id)::int AS count
         FROM epidemic_zones z2
-        LEFT JOIN reports r
-          ON r.location IS NOT NULL
-          AND r.status <> 'rejected'
+        LEFT JOIN cases c
+          ON c.geom IS NOT NULL
+          AND c.status IN ('suspected', 'probable', 'confirmed', 'under treatment', 'under observation')
           AND ST_DWithin(
             z2.center::geography,
-            r.location::geography,
+            c.geom::geography,
             z2."radiusKm" * 1000
           )
         GROUP BY z2.id
