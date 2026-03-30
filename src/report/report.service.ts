@@ -74,13 +74,71 @@ export class ReportService {
       ...rest
     } = createReportDto;
 
-    // Calculate submission count for this user and disease type
-    // NOTE: This was previously used for userSubmissionCount but field was removed
-    // Keeping the count logic here for potential future use in analytics
+    const normalizedDescription = createReportDto.description.trim();
+
+    // Basic anti-spam: block duplicate submissions in short time window
+    const duplicateWindowMinutes = 10;
+    const duplicateReport = await this.reportRepository
+      .createQueryBuilder('report')
+      .where('report.userId = :userId', { userId })
+      .andWhere('report.diseaseType = :diseaseType', {
+        diseaseType: createReportDto.diseaseType,
+      })
+      .andWhere('report.reportType = :reportType', {
+        reportType: createReportDto.reportType || 'case_report',
+      })
+      .andWhere(
+        `ST_DWithin(
+          report.location::geography,
+          ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography,
+          600
+        )`,
+        { lat, lon },
+      )
+      .andWhere('LOWER(TRIM(report.description)) = LOWER(TRIM(:description))', {
+        description: normalizedDescription,
+      })
+      .andWhere(`report.createdAt >= NOW() - INTERVAL '${duplicateWindowMinutes} minutes'`)
+      .orderBy('report.createdAt', 'DESC')
+      .getOne();
+
+    if (duplicateReport) {
+      throw new BadRequestException(
+        'Bạn vừa gửi báo cáo tương tự trong vài phút gần đây. Vui lòng tránh gửi trùng.',
+      );
+    }
+
+    const recentHourlyCount = await this.reportRepository
+      .createQueryBuilder('report')
+      .where('report.userId = :userId', { userId })
+      .andWhere(`report.createdAt >= NOW() - INTERVAL '1 hour'`)
+      .getCount();
+
+    if (recentHourlyCount >= 8) {
+      throw new BadRequestException(
+        'Bạn đã gửi quá nhiều báo cáo trong 1 giờ qua. Vui lòng thử lại sau.',
+      );
+    }
+
+    if (createReportDto.deviceId) {
+      const deviceHourlyCount = await this.reportRepository
+        .createQueryBuilder('report')
+        .where('report.deviceId = :deviceId', {
+          deviceId: createReportDto.deviceId,
+        })
+        .andWhere(`report.createdAt >= NOW() - INTERVAL '1 hour'`)
+        .getCount();
+
+      if (deviceHourlyCount >= 10) {
+        throw new BadRequestException(
+          'Thiết bị đã gửi quá nhiều báo cáo trong 1 giờ qua. Vui lòng thử lại sau.',
+        );
+      }
+    }
 
     const reportData: Partial<Report> = {
       ...rest,
-      userId,
+      description: normalizedDescription,
       status: ReportStatus.SUBMITTED,
       reportType: createReportDto.reportType || 'case_report',
       isDetailedReport: isDetailedReport || false,

@@ -22,7 +22,6 @@ import {
   OfficialConfirmationDto,
   CloseReportDto,
 } from './dto/update-status.dto';
-import { VerifiedGuard } from '../auth/guards/verified.guard';
 import { AuditLogService } from '../admin/audit-log.service';
 import { AuditAction, AuditResource } from '../admin/entities/audit-log.entity';
 
@@ -33,8 +32,8 @@ export class ReportController {
     private readonly auditLogService: AuditLogService,
   ) {}
 
-  // Creating reports requires both email and phone verification
-  @UseGuards(AuthGuard('jwt'), VerifiedGuard)
+  // Report creation requires authentication. Email OTP is handled at client flow.
+  @UseGuards(AuthGuard('jwt'))
   @Post()
   async create(@Request() req, @Body() createReportDto: CreateReportDto) {
     return this.reportService.create(req.user.id, createReportDto);

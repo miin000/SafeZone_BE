@@ -25,6 +25,7 @@ export class ZoneService {
         FROM epidemic_zones z2
         LEFT JOIN cases c
           ON c.geom IS NOT NULL
+          AND c.disease_type = z2."diseaseType"
           AND c.status IN ('suspected', 'probable', 'confirmed', 'under treatment', 'under observation')
           AND ST_DWithin(
             z2.center::geography,
@@ -49,7 +50,9 @@ export class ZoneService {
       },
     });
 
-    return this.zoneRepository.save(zone);
+    const saved = await this.zoneRepository.save(zone);
+    await this.syncCaseCountsFromReports();
+    return this.findOne(saved.id);
   }
 
   async findAll(onlyActive: boolean = true): Promise<EpidemicZone[]> {
@@ -121,7 +124,9 @@ export class ZoneService {
     const { lat, lon, ...rest } = updateZoneDto;
     Object.assign(zone, rest);
 
-    return this.zoneRepository.save(zone);
+    await this.zoneRepository.save(zone);
+    await this.syncCaseCountsFromReports();
+    return this.findOne(id);
   }
 
   async remove(id: string): Promise<void> {
