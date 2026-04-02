@@ -236,7 +236,7 @@ export class AuthService {
   }
 
   // Get verification status
-  // Note: Only phone verification is required for reporting
+  // Reporting is allowed when at least one channel (email or phone) is verified.
   async getVerificationStatus(userId: string): Promise<{
     isEmailVerified: boolean;
     isPhoneVerified: boolean;
@@ -254,7 +254,7 @@ export class AuthService {
       isEmailVerified: user.isEmailVerified,
       isPhoneVerified: user.isPhoneVerified,
       isFullyVerified: user.isEmailVerified && user.isPhoneVerified,
-      canReport: user.isEmailVerified && user.isPhoneVerified,
+      canReport: user.isEmailVerified || user.isPhoneVerified,
       email: user.email || null,
       phone: user.phone,
     };
@@ -337,10 +337,6 @@ export class AuthService {
       throw new BadRequestException('Chưa cập nhật số điện thoại');
     }
 
-    if (user.isPhoneVerified) {
-      throw new BadRequestException('Số điện thoại đã được xác thực');
-    }
-
     // Use Twilio Verify API - it handles OTP generation and sending
     const result = await this.smsService.sendOtpSms(user.phone);
 
@@ -368,10 +364,6 @@ export class AuthService {
       throw new BadRequestException('Chưa cập nhật số điện thoại');
     }
 
-    if (user.isPhoneVerified) {
-      throw new BadRequestException('Số điện thoại đã được xác thực');
-    }
-
     // Verify OTP via Twilio Verify API
     const result = await this.smsService.verifyOtp(user.phone, otp);
 
@@ -379,7 +371,8 @@ export class AuthService {
       throw new BadRequestException(result.message);
     }
 
-    // Mark phone as verified
+    // Keep verified state and allow OTP challenge reuse for sensitive actions
+    // such as report submission confirmations.
     user.isPhoneVerified = true;
     user.phoneOtp = null;
     user.phoneOtpExpires = null;

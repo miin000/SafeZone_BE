@@ -1,6 +1,11 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import { types as pgTypes } from 'pg';
+
+// PostgreSQL TIMESTAMP (without timezone) should be interpreted as UTC.
+// Without this, environments running in GMT+7 can show values shifted by -7 hours.
+pgTypes.setTypeParser(1114, (value: string) => new Date(`${value}Z`));
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);

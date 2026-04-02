@@ -83,12 +83,16 @@ export class ZoneService {
         `ST_DWithin(
           zone.center::geography,
           ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography,
-          :radius
+          :radius + (zone."radiusKm" * 1000)
         )`,
         { lat, lon, radius: radiusKm * 1000 },
       )
       .andWhere('zone.isActive = :isActive', { isActive: true })
+      .andWhere('zone.caseCount > 0')
+      .andWhere('(zone."startDate" IS NULL OR zone."startDate" <= NOW())')
+      .andWhere('(zone."endDate" IS NULL OR zone."endDate" >= NOW())')
       .orderBy('zone.riskLevel', 'DESC')
+      .addOrderBy('zone.caseCount', 'DESC')
       .getMany();
   }
 
@@ -104,7 +108,11 @@ export class ZoneService {
         { lat, lon },
       )
       .andWhere('zone.isActive = :isActive', { isActive: true })
+      .andWhere('zone.caseCount > 0')
+      .andWhere('(zone."startDate" IS NULL OR zone."startDate" <= NOW())')
+      .andWhere('(zone."endDate" IS NULL OR zone."endDate" >= NOW())')
       .orderBy('zone.riskLevel', 'DESC')
+      .addOrderBy('zone.caseCount', 'DESC')
       .getMany();
   }
 

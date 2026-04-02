@@ -20,6 +20,7 @@ import { NotificationService } from '../notification/notification.service';
 import { NotificationType } from '../notification/entities/notification.entity';
 import { GisService } from '../gis/gis.service';
 import { ZoneService } from '../zone/zone.service';
+import { User } from '../auth/entities/user.entity';
 
 @Injectable()
 export class ReportService {
@@ -74,171 +75,224 @@ export class ReportService {
       ...rest
     } = createReportDto;
 
-    const normalizedDescription = createReportDto.description.trim();
-
-    // Basic anti-spam: block duplicate submissions in short time window
-    const duplicateWindowMinutes = 10;
-    const duplicateReport = await this.reportRepository
-      .createQueryBuilder('report')
-      .where('report.userId = :userId', { userId })
-      .andWhere('report.diseaseType = :diseaseType', {
-        diseaseType: createReportDto.diseaseType,
-      })
-      .andWhere('report.reportType = :reportType', {
-        reportType: createReportDto.reportType || 'case_report',
-      })
-      .andWhere(
-        `ST_DWithin(
-          report.location::geography,
-          ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography,
-          600
-        )`,
-        { lat, lon },
-      )
-      .andWhere('LOWER(TRIM(report.description)) = LOWER(TRIM(:description))', {
-        description: normalizedDescription,
-      })
-      .andWhere(`report.createdAt >= NOW() - INTERVAL '${duplicateWindowMinutes} minutes'`)
-      .orderBy('report.createdAt', 'DESC')
-      .getOne();
-
-    if (duplicateReport) {
-      throw new BadRequestException(
-        'Bạn vừa gửi báo cáo tương tự trong vài phút gần đây. Vui lòng tránh gửi trùng.',
-      );
+    const normalizedDescription = (createReportDto.description || '').trim();
+    if (!normalizedDescription) {
+      throw new BadRequestException('Mô tả báo cáo không được để trống');
     }
 
-    const recentHourlyCount = await this.reportRepository
-      .createQueryBuilder('report')
-      .where('report.userId = :userId', { userId })
-      .andWhere(`report.createdAt >= NOW() - INTERVAL '1 hour'`)
-      .getCount();
+    const reportType = createReportDto.reportType || 'case_report';
 
-    if (recentHourlyCount >= 8) {
-      throw new BadRequestException(
-        'Bạn đã gửi quá nhiều báo cáo trong 1 giờ qua. Vui lòng thử lại sau.',
-      );
-    }
-
-    if (createReportDto.deviceId) {
-      const deviceHourlyCount = await this.reportRepository
-        .createQueryBuilder('report')
-        .where('report.deviceId = :deviceId', {
-          deviceId: createReportDto.deviceId,
-        })
-        .andWhere(`report.createdAt >= NOW() - INTERVAL '1 hour'`)
-        .getCount();
-
-      if (deviceHourlyCount >= 10) {
-        throw new BadRequestException(
-          'Thiết bị đã gửi quá nhiều báo cáo trong 1 giờ qua. Vui lòng thử lại sau.',
+    const savedReport = await this.reportRepository.manager.transaction(
+      async (manager) => {
+        const txUserRepository = manager.getRepository(User);
+        const txReportRepository = manager.getRepository(Report);
+        const txStatusHistoryRepository = manager.getRepository(
+          ReportStatusHistory,
         );
-      }
-    }
 
-    const reportData: Partial<Report> = {
-      ...rest,
-      description: normalizedDescription,
-      status: ReportStatus.SUBMITTED,
-      reportType: createReportDto.reportType || 'case_report',
-      isDetailedReport: isDetailedReport || false,
-      isSelfReport: createReportDto.isSelfReport ?? true,
-      reporterName: createReportDto.reporterName,
-      reporterPhone: createReportDto.reporterPhone,
-      severityLevel: createReportDto.severityLevel || 'medium',
-      reporterConsent: createReportDto.reporterConsent || false,
-      deviceId: createReportDto.deviceId,
-      // Epidemiological info
-      hasContactWithPatient: createReportDto.hasContactWithPatient,
-      hasVisitedEpidemicArea: createReportDto.hasVisitedEpidemicArea,
-      hasSimilarCasesNearby: createReportDto.hasSimilarCasesNearby,
-      estimatedNearbyCount: createReportDto.estimatedNearbyCount,
-      // Medical info
-      hasVisitedDoctor: createReportDto.hasVisitedDoctor,
-      hasTestResult: createReportDto.hasTestResult,
-      testResultDescription: createReportDto.testResultDescription,
-      testResultImageUrls: createReportDto.testResultImageUrls,
-      medicalCertImageUrls: createReportDto.medicalCertImageUrls,
-      // Outbreak fields
-      locationDescription: createReportDto.locationDescription,
-      locationType: createReportDto.locationType as any,
-      suspectedDisease: createReportDto.suspectedDisease,
-      outbreakDescription: createReportDto.outbreakDescription,
-      discoveryTime: createReportDto.discoveryTime
-        ? new Date(createReportDto.discoveryTime)
-        : undefined,
-      patientInfo: patientInfo
-        ? {
-            fullName: patientInfo.fullName,
-            age: patientInfo.age,
-            yearOfBirth: patientInfo.yearOfBirth,
-            gender: patientInfo.gender,
-            idNumber: patientInfo.idNumber,
-            phone: patientInfo.phone,
-            address: patientInfo.address,
-            occupation: patientInfo.occupation,
-            workplace: patientInfo.workplace,
-            symptomOnsetDate: patientInfo.symptomOnsetDate,
-            healthFacility: patientInfo.healthFacility,
-            isHospitalized: patientInfo.isHospitalized,
-            travelHistory: patientInfo.travelHistory,
-            contactHistory: patientInfo.contactHistory,
-            underlyingConditions: patientInfo.underlyingConditions,
-          }
-        : undefined,
-      // Patient query columns
-      patientGender: patientInfo?.gender,
-      patientYearOfBirth: patientInfo?.yearOfBirth,
-      patientPhone: patientInfo?.phone,
-      symptomOnsetDate: patientInfo?.symptomOnsetDate
-        ? new Date(patientInfo.symptomOnsetDate)
-        : undefined,
-      location: {
-        type: 'Point',
-        coordinates: [lon, lat],
-      },
-    };
+        const user = await txUserRepository
+          .createQueryBuilder('user')
+          .setLock('pessimistic_write')
+          .where('user.id = :userId', { userId })
+          .getOne();
 
-    if (
-      createReportDto.hasSimilarCasesNearby === undefined ||
-      createReportDto.estimatedNearbyCount === undefined
-    ) {
-      try {
-        const zones = await this.zoneService.checkPointInZone(lat, lon);
-        if (createReportDto.hasSimilarCasesNearby === undefined) {
-          reportData.hasSimilarCasesNearby = zones.length > 0;
+        if (!user) {
+          throw new NotFoundException('Người dùng không tồn tại');
         }
-        if (createReportDto.estimatedNearbyCount === undefined) {
-          reportData.estimatedNearbyCount = zones.reduce(
-            (sum, zone) => sum + (zone.caseCount || 0),
-            0,
+
+        if (user.isBlacklisted) {
+          throw new ForbiddenException(
+            'Tài khoản của bạn đã bị khóa và không thể gửi báo cáo',
           );
         }
-      } catch (error) {
-        // Keep report creation resilient even if zone lookup fails.
-        console.error('Failed to derive zone proximity for report:', error);
-      }
-    }
 
-    // Store reporter's location if provided
-    if (reporterLat !== undefined && reporterLon !== undefined) {
-      reportData.reporterLocation = {
-        type: 'Point',
-        coordinates: [reporterLon, reporterLat],
-      };
-    }
+        if (!user.isEmailVerified && !user.isPhoneVerified) {
+          throw new ForbiddenException(
+            'Vui lòng xác thực OTP email hoặc số điện thoại trước khi gửi báo cáo',
+          );
+        }
 
-    const report = this.reportRepository.create(reportData);
-    const savedReport = await this.reportRepository.save(report);
+        const duplicateWindowMinutes = 10;
+        const duplicateReport = await txReportRepository
+          .createQueryBuilder('report')
+          .where('report.userId = :userId', { userId })
+          .andWhere('report.diseaseType = :diseaseType', {
+            diseaseType: createReportDto.diseaseType,
+          })
+          .andWhere('report.reportType = :reportType', {
+            reportType,
+          })
+          .andWhere(
+            `ST_DWithin(
+              report.location::geography,
+              ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography,
+              600
+            )`,
+            { lat, lon },
+          )
+          .andWhere(
+            'LOWER(TRIM(report.description)) = LOWER(TRIM(:description))',
+            { description: normalizedDescription },
+          )
+          .andWhere(
+            `report.createdAt >= NOW() - INTERVAL '${duplicateWindowMinutes} minutes'`,
+          )
+          .orderBy('report.createdAt', 'DESC')
+          .getOne();
 
-    // Log initial status
-    await this.logStatusChange(
-      savedReport.id,
-      null,
-      ReportStatus.SUBMITTED,
-      userId,
-      'user',
-      'Báo cáo được tạo',
+        if (duplicateReport) {
+          throw new BadRequestException(
+            'Bạn vừa gửi báo cáo tương tự trong vài phút gần đây. Vui lòng tránh gửi trùng.',
+          );
+        }
+
+        const recentHourlyCount = await txReportRepository
+          .createQueryBuilder('report')
+          .where('report.userId = :userId', { userId })
+          .andWhere(`report.createdAt >= NOW() - INTERVAL '1 hour'`)
+          .getCount();
+
+        if (recentHourlyCount >= 8) {
+          throw new BadRequestException(
+            'Bạn đã gửi quá nhiều báo cáo trong 1 giờ qua. Vui lòng thử lại sau.',
+          );
+        }
+
+        if (createReportDto.deviceId) {
+          const deviceHourlyCount = await txReportRepository
+            .createQueryBuilder('report')
+            .where('report.deviceId = :deviceId', {
+              deviceId: createReportDto.deviceId,
+            })
+            .andWhere(`report.createdAt >= NOW() - INTERVAL '1 hour'`)
+            .getCount();
+
+          if (deviceHourlyCount >= 10) {
+            throw new BadRequestException(
+              'Thiết bị đã gửi quá nhiều báo cáo trong 1 giờ qua. Vui lòng thử lại sau.',
+            );
+          }
+        }
+
+        const reportData: Partial<Report> = {
+          ...rest,
+          userId,
+          description: normalizedDescription,
+          status: ReportStatus.SUBMITTED,
+          reportType,
+          isDetailedReport: isDetailedReport || false,
+          isSelfReport: createReportDto.isSelfReport ?? true,
+          reporterName: createReportDto.reporterName,
+          reporterPhone: createReportDto.reporterPhone,
+          severityLevel: createReportDto.severityLevel || 'medium',
+          reporterConsent: createReportDto.reporterConsent || false,
+          deviceId: createReportDto.deviceId,
+          // Epidemiological info
+          hasContactWithPatient: createReportDto.hasContactWithPatient,
+          hasVisitedEpidemicArea: createReportDto.hasVisitedEpidemicArea,
+          hasSimilarCasesNearby: createReportDto.hasSimilarCasesNearby,
+          estimatedNearbyCount: createReportDto.estimatedNearbyCount,
+          // Medical info
+          hasVisitedDoctor: createReportDto.hasVisitedDoctor,
+          hasTestResult: createReportDto.hasTestResult,
+          testResultDescription: createReportDto.testResultDescription,
+          testResultImageUrls: createReportDto.testResultImageUrls,
+          medicalCertImageUrls: createReportDto.medicalCertImageUrls,
+          // Outbreak fields
+          locationDescription: createReportDto.locationDescription,
+          locationType: createReportDto.locationType as any,
+          suspectedDisease: createReportDto.suspectedDisease,
+          outbreakDescription: createReportDto.outbreakDescription,
+          discoveryTime: createReportDto.discoveryTime
+            ? new Date(createReportDto.discoveryTime)
+            : undefined,
+          patientInfo: patientInfo
+            ? {
+                fullName: patientInfo.fullName,
+                age: patientInfo.age,
+                yearOfBirth: patientInfo.yearOfBirth,
+                gender: patientInfo.gender,
+                idNumber: patientInfo.idNumber,
+                phone: patientInfo.phone,
+                address: patientInfo.address,
+                occupation: patientInfo.occupation,
+                workplace: patientInfo.workplace,
+                symptomOnsetDate: patientInfo.symptomOnsetDate,
+                healthFacility: patientInfo.healthFacility,
+                isHospitalized: patientInfo.isHospitalized,
+                travelHistory: patientInfo.travelHistory,
+                contactHistory: patientInfo.contactHistory,
+                underlyingConditions: patientInfo.underlyingConditions,
+              }
+            : undefined,
+          // Patient query columns
+          patientGender: patientInfo?.gender,
+          patientYearOfBirth: patientInfo?.yearOfBirth,
+          patientPhone: patientInfo?.phone,
+          symptomOnsetDate: patientInfo?.symptomOnsetDate
+            ? new Date(patientInfo.symptomOnsetDate)
+            : undefined,
+          location: {
+            type: 'Point',
+            coordinates: [lon, lat],
+          },
+        };
+
+        if (
+          createReportDto.hasSimilarCasesNearby === undefined ||
+          createReportDto.estimatedNearbyCount === undefined
+        ) {
+          try {
+            const zones = await this.zoneService.checkPointInZone(lat, lon);
+            if (createReportDto.hasSimilarCasesNearby === undefined) {
+              reportData.hasSimilarCasesNearby = zones.length > 0;
+            }
+            if (createReportDto.estimatedNearbyCount === undefined) {
+              reportData.estimatedNearbyCount = zones.reduce(
+                (sum, zone) => sum + (zone.caseCount || 0),
+                0,
+              );
+            }
+          } catch (error) {
+            console.error('Failed to derive zone proximity for report:', error);
+          }
+        }
+
+        if (reporterLat !== undefined && reporterLon !== undefined) {
+          reportData.reporterLocation = {
+            type: 'Point',
+            coordinates: [reporterLon, reporterLat],
+          };
+        }
+
+        const report = txReportRepository.create(reportData);
+        const createdReport = await txReportRepository.save(report);
+
+        const statusHistory = txStatusHistoryRepository.create({
+          reportId: createdReport.id,
+          previousStatus: undefined,
+          newStatus: ReportStatus.SUBMITTED,
+          changedBy: userId,
+          changedByRole: 'user',
+          note: 'Báo cáo được tạo',
+        });
+        await txStatusHistoryRepository.save(statusHistory);
+
+        const now = new Date();
+        const today = now.toISOString().slice(0, 10);
+        const lastReportDay = user.lastReportDate
+          ? user.lastReportDate instanceof Date
+            ? user.lastReportDate.toISOString().slice(0, 10)
+            : String(user.lastReportDate).slice(0, 10)
+          : null;
+
+        user.dailyReportCount =
+          lastReportDay === today ? (user.dailyReportCount || 0) + 1 : 1;
+        user.lastReportDate = now;
+        await txUserRepository.save(user);
+
+        return createdReport;
+      },
     );
 
     // Note: Automatic verification has been removed.
