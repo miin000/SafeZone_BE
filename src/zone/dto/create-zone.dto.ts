@@ -8,7 +8,11 @@ import {
   Max,
   IsDateString,
 } from 'class-validator';
-import { RiskLevel } from '../entities/epidemic-zone.entity';
+import {
+  RiskLevel,
+  ZoneLifecycleStatus,
+  ZoneSource,
+} from '../entities/epidemic-zone.entity';
 
 export class CreateZoneDto {
   @IsString()
@@ -47,6 +51,23 @@ export class CreateZoneDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsEnum(ZoneLifecycleStatus)
+  lifecycleStatus?: ZoneLifecycleStatus;
+
+  @IsOptional()
+  @IsEnum(ZoneSource)
+  source?: ZoneSource;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  proposalConfidence?: number;
+
+  @IsOptional()
+  proposedBy?: string;
 
   @IsOptional()
   @IsDateString()

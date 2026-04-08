@@ -18,6 +18,12 @@ import { ZoneService } from './zone.service';
 import { CreateZoneDto } from './dto/create-zone.dto';
 import { UpdateZoneDto } from './dto/update-zone.dto';
 import { NotificationService } from '../notification/notification.service';
+import { ProposeZonesDbscanDto } from './dto/propose-zones-dbscan.dto';
+import { ReviewZoneProposalDto } from './dto/review-zone-proposal.dto';
+import {
+  ZoneLifecycleStatus,
+  ZoneSource,
+} from './entities/epidemic-zone.entity';
 
 @Controller('zones')
 export class ZoneController {
@@ -29,13 +35,49 @@ export class ZoneController {
   @Post()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
-  async create(@Body() createZoneDto: CreateZoneDto) {
-    return this.zoneService.create(createZoneDto);
+  async create(@Body() createZoneDto: CreateZoneDto, @Request() req: any) {
+    const actorId = req?.user?.sub || req?.user?.id;
+    return this.zoneService.create(createZoneDto, actorId);
+  }
+
+  @Post('proposals/dbscan')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
+  async proposeFromDbscan(
+    @Body() dto: ProposeZonesDbscanDto,
+    @Request() req: any,
+  ) {
+    const actorId = req?.user?.sub || req?.user?.id;
+    return this.zoneService.proposeFromDbscan({
+      ...dto,
+      proposedBy: actorId,
+    });
+  }
+
+  @Post('proposals/dbscan/preview')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
+  async previewDbscanProposals(
+    @Body() dto: ProposeZonesDbscanDto,
+  ): Promise<any> {
+    return this.zoneService.previewDbscanProposals(dto);
   }
 
   @Get()
-  async findAll(@Query('all') all: string) {
-    return this.zoneService.findAll(all !== 'true');
+  async findAll(
+    @Query('all') all: string,
+    @Query('active') active?: string,
+    @Query('lifecycleStatus') lifecycleStatus?: ZoneLifecycleStatus,
+    @Query('source') source?: ZoneSource,
+  ) {
+    const onlyActive =
+      active === 'true' ? true : active === 'false' ? false : all !== 'true';
+
+    return this.zoneService.findAll({
+      onlyActive,
+      lifecycleStatus,
+      source,
+    });
   }
 
   @Get('nearby')
@@ -105,6 +147,30 @@ export class ZoneController {
   @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
   async update(@Param('id') id: string, @Body() updateZoneDto: UpdateZoneDto) {
     return this.zoneService.update(id, updateZoneDto);
+  }
+
+  @Patch(':id/approve')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
+  async approveProposal(
+    @Param('id') id: string,
+    @Body() body: ReviewZoneProposalDto,
+    @Request() req: any,
+  ) {
+    const reviewerId = req?.user?.sub || req?.user?.id;
+    return this.zoneService.approveProposal(id, reviewerId, body.note);
+  }
+
+  @Patch(':id/reject')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.HEALTH_AUTHORITY)
+  async rejectProposal(
+    @Param('id') id: string,
+    @Body() body: ReviewZoneProposalDto,
+    @Request() req: any,
+  ) {
+    const reviewerId = req?.user?.sub || req?.user?.id;
+    return this.zoneService.rejectProposal(id, reviewerId, body.note);
   }
 
   @Patch(':id/deactivate')

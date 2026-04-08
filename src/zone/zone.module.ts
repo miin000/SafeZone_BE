@@ -5,11 +5,13 @@ import { ZoneService } from './zone.service';
 import { EpidemicZone } from './entities/epidemic-zone.entity';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
+import { GisModule } from '../gis/gis.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([EpidemicZone]),
     AuthModule,
+    GisModule,
     forwardRef(() => NotificationModule),
   ],
   controllers: [ZoneController],

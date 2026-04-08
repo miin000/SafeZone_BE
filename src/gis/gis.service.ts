@@ -840,7 +840,7 @@ export class GisService {
             f.geom::geometry,
             eps := ${distParam},
             minpoints := ${minPointsParam}
-          ) OVER () AS cluster_id
+          ) OVER (PARTITION BY f.disease_type) AS cluster_id
         FROM filtered f
       ),
       classified AS (
@@ -856,29 +856,73 @@ export class GisService {
         JOIN LATERAL (
           SELECT COUNT(*)::int AS neighbor_count
           FROM clustered b
-          WHERE ST_DWithin(a.geom::geometry, b.geom::geometry, ${distParam})
+          WHERE b.disease_type = a.disease_type
+            AND ST_DWithin(a.geom::geometry, b.geom::geometry, ${distParam})
         ) n ON TRUE
+      ),
+      cluster_aggregates AS (
+        SELECT
+          disease_type,
+          cluster_id,
+          ST_Centroid(ST_Collect(geom::geometry)) AS centroid_geom,
+          COUNT(*)::int AS count,
+          ST_X(ST_Centroid(ST_Collect(geom::geometry)))::float AS center_lon,
+          ST_Y(ST_Centroid(ST_Collect(geom::geometry)))::float AS center_lat,
+          SUM(severity)::int AS total_severity,
+          ROUND(AVG(severity)::numeric, 2)::float AS avg_severity,
+          MAX(severity)::int AS max_severity,
+          COUNT(*) FILTER (WHERE point_type = 'core')::int AS core_count,
+          COUNT(*) FILTER (WHERE point_type = 'border')::int AS border_count,
+          MIN(neighbor_count)::int AS min_neighbors,
+          MAX(neighbor_count)::int AS max_neighbors,
+          ARRAY_AGG(DISTINCT disease_type) AS diseases,
+          ARRAY_AGG(DISTINCT status) AS statuses,
+          MIN(reported_time) AS earliest_case,
+          MAX(reported_time) AS latest_case
+        FROM classified
+        WHERE cluster_id IS NOT NULL
+        GROUP BY disease_type, cluster_id
+      ),
+      cluster_max_distance AS (
+        SELECT
+          ca.disease_type,
+          ca.cluster_id,
+          COALESCE(
+            MAX(
+              ST_DistanceSphere(c.geom::geometry, ca.centroid_geom::geometry)
+            ) / 1000.0,
+            0
+          )::float AS max_distance_km
+        FROM cluster_aggregates ca
+        JOIN classified c
+          ON c.disease_type = ca.disease_type
+         AND c.cluster_id = ca.cluster_id
+        GROUP BY ca.disease_type, ca.cluster_id
       )
       SELECT
-        cluster_id,
-        COUNT(*)::int AS count,
-        ST_X(ST_Centroid(ST_Collect(geom::geometry)))::float AS center_lon,
-        ST_Y(ST_Centroid(ST_Collect(geom::geometry)))::float AS center_lat,
-        SUM(severity)::int AS total_severity,
-        ROUND(AVG(severity)::numeric, 2)::float AS avg_severity,
-        MAX(severity)::int AS max_severity,
-        COUNT(*) FILTER (WHERE point_type = 'core')::int AS core_count,
-        COUNT(*) FILTER (WHERE point_type = 'border')::int AS border_count,
-        MIN(neighbor_count)::int AS min_neighbors,
-        MAX(neighbor_count)::int AS max_neighbors,
-        ARRAY_AGG(DISTINCT disease_type) AS diseases,
-        ARRAY_AGG(DISTINCT status) AS statuses,
-        MIN(reported_time) AS earliest_case,
-        MAX(reported_time) AS latest_case
-      FROM classified
-      WHERE cluster_id IS NOT NULL
-      GROUP BY cluster_id
-      ORDER BY count DESC
+        ca.disease_type,
+        CONCAT(ca.disease_type, ':', ca.cluster_id::text) AS cluster_key,
+        ca.cluster_id,
+        ca.count,
+        ca.center_lon,
+        ca.center_lat,
+        cmd.max_distance_km,
+        ca.total_severity,
+        ca.avg_severity,
+        ca.max_severity,
+        ca.core_count,
+        ca.border_count,
+        ca.min_neighbors,
+        ca.max_neighbors,
+        ca.diseases,
+        ca.statuses,
+        ca.earliest_case,
+        ca.latest_case
+      FROM cluster_aggregates ca
+      JOIN cluster_max_distance cmd
+        ON cmd.disease_type = ca.disease_type
+       AND cmd.cluster_id = ca.cluster_id
+      ORDER BY ca.count DESC
       `,
       values,
     );
@@ -903,7 +947,7 @@ export class GisService {
             f.geom::geometry,
             eps := ${distParam},
             minpoints := ${minPointsParam}
-          ) OVER () AS cluster_id
+          ) OVER (PARTITION BY f.disease_type) AS cluster_id
         FROM filtered f
       )
       SELECT
@@ -935,7 +979,7 @@ export class GisService {
                 f.geom::geometry,
                 eps := ${distParam},
                 minpoints := ${minPointsParam}
-              ) OVER () AS cluster_id
+              ) OVER (PARTITION BY f.disease_type) AS cluster_id
             FROM filtered f
           )
           SELECT
@@ -986,11 +1030,14 @@ export class GisService {
       }
 
       return {
-        id: cluster.cluster_id,
+        id: cluster.cluster_key || cluster.cluster_id,
         count: cluster.count,
         center: {
           lat: cluster.center_lat,
           lon: cluster.center_lon,
+        },
+        spatial: {
+          maxDistanceKm: Number(cluster.max_distance_km || 0),
         },
         severity: {
           total: cluster.total_severity,

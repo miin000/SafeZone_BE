@@ -15,6 +15,19 @@ export enum RiskLevel {
   CRITICAL = 'critical',
 }
 
+export enum ZoneLifecycleStatus {
+  PROPOSED = 'proposed',
+  PENDING_APPROVAL = 'pending_approval',
+  APPROVED = 'approved',
+  REJECTED = 'rejected',
+  CLOSED = 'closed',
+}
+
+export enum ZoneSource {
+  MANUAL = 'manual',
+  DBSCAN = 'dbscan',
+}
+
 @Entity('epidemic_zones')
 export class EpidemicZone {
   @PrimaryGeneratedColumn('uuid')
@@ -48,16 +61,51 @@ export class EpidemicZone {
   caseCount: number;
 
   @Column('text', { nullable: true })
-  description: string;
+  description: string | null;
 
   @Column({ default: true })
   isActive: boolean;
 
-  @Column({ nullable: true })
-  startDate: Date;
+  @Column({
+    type: 'enum',
+    enum: ZoneLifecycleStatus,
+    default: ZoneLifecycleStatus.APPROVED,
+  })
+  lifecycleStatus: ZoneLifecycleStatus;
 
-  @Column({ nullable: true })
-  endDate: Date;
+  @Column({
+    type: 'enum',
+    enum: ZoneSource,
+    default: ZoneSource.MANUAL,
+  })
+  source: ZoneSource;
+
+  @Column('float', { nullable: true })
+  proposalConfidence: number | null;
+
+  @Column('jsonb', { nullable: true })
+  proposalMetadata: Record<string, any> | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  proposedAt: Date | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  proposedBy: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  reviewedAt: Date | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  reviewedBy: string | null;
+
+  @Column('text', { nullable: true })
+  reviewNote: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  startDate: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  endDate: Date | null;
 
   @CreateDateColumn()
   createdAt: Date;
