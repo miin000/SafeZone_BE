@@ -155,6 +155,7 @@ export class ZoneService implements OnModuleInit {
             SELECT DISTINCT disease_type
             FROM cases
             WHERE disease_type IS NOT NULL
+              AND is_archived IS NOT TRUE
             ORDER BY disease_type ASC
             `,
           )
@@ -181,6 +182,7 @@ export class ZoneService implements OnModuleInit {
     const where: string[] = [
       'c.geom IS NOT NULL',
       'c.disease_type = $1',
+      'c.is_archived IS NOT TRUE',
       'ST_DWithin(c.geom::geography, ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography, $4)',
     ];
     const values: any[] = [zone.diseaseType, lon, lat, radiusKm * 1000];
@@ -221,6 +223,7 @@ export class ZoneService implements OnModuleInit {
         LEFT JOIN cases c
           ON c.geom IS NOT NULL
           AND c.disease_type = z2."diseaseType"
+          AND c.is_archived IS NOT TRUE
           AND c.status IN ('suspected', 'probable', 'confirmed', 'under treatment', 'under observation')
           AND ST_DWithin(
             z2.center::geography,

@@ -3,7 +3,7 @@ import { DataSource } from 'typeorm';
 import { getDataSourceToken } from '@nestjs/typeorm';
 
 export interface CaseDto {
-  id?: number;
+  id?: string;
   external_id?: string;
   disease_type: string;
   status: string;
@@ -16,6 +16,7 @@ export interface CaseDto {
   patient_age?: number;
   patient_gender?: string;
   notes?: string;
+  outbreak_id?: string;
 }
 
 export interface ReverseGeocodeResult {
@@ -43,6 +44,168 @@ export class GisService {
     return status === 'died' ? 'deceased' : status;
   }
 
+  private async resolveOutbreakIdForCase(params: {
+    diseaseType: string;
+    reportedTime: string;
+  }): Promise<string | null> {
+    const { diseaseType, reportedTime } = params;
+
+    // disease_type in cases is a free text; we only auto-link outbreaks for diseases in catalog
+    const diseaseRows = await this.dataSource.query(
+      `SELECT id FROM diseases WHERE name = $1 LIMIT 1`,
+      [diseaseType],
+    );
+    const diseaseId = diseaseRows?.[0]?.id as string | undefined;
+    if (!diseaseId) return null;
+
+    const activeRows = await this.dataSource.query(
+      `
+      SELECT id
+      FROM disease_outbreaks
+      WHERE disease_id = $1 AND status = 'active'
+      ORDER BY start_date DESC
+      LIMIT 1
+      `,
+      [diseaseId],
+    );
+    const activeId = activeRows?.[0]?.id as string | undefined;
+    if (activeId) return activeId;
+
+    // No active outbreak yet => create one so existing flows keep working.
+    try {
+      const [created] = await this.dataSource.query(
+        `
+        INSERT INTO disease_outbreaks (disease_id, start_date, status, created_at, updated_at)
+        VALUES ($1, $2::timestamptz, 'active', now(), now())
+        RETURNING id
+        `,
+        [diseaseId, reportedTime],
+      );
+      return created?.id ?? null;
+    } catch {
+      // In case of race (unique active index), just read again.
+      const retry = await this.dataSource.query(
+        `
+        SELECT id
+        FROM disease_outbreaks
+        WHERE disease_id = $1 AND status = 'active'
+        ORDER BY start_date DESC
+        LIMIT 1
+        `,
+        [diseaseId],
+      );
+      return retry?.[0]?.id ?? null;
+    }
+  }
+
+  async archiveCases(params: {
+    diseaseType?: string;
+    from?: string;
+    to?: string;
+    outbreakId?: string;
+  }): Promise<{ affected: number }> {
+    const { diseaseType, from, to, outbreakId } = params;
+    const where: string[] = ['c.is_archived IS NOT TRUE'];
+    const values: any[] = [];
+
+    if (diseaseType) {
+      values.push(diseaseType);
+      where.push(`c.disease_type = $${values.length}`);
+    }
+    if (from) {
+      values.push(from);
+      where.push(`c.reported_time >= $${values.length}::timestamptz`);
+    }
+    if (to) {
+      values.push(to);
+      where.push(`c.reported_time <= $${values.length}::timestamptz`);
+    }
+    if (outbreakId) {
+      values.push(outbreakId);
+      where.push(`
+        EXISTS (
+          SELECT 1
+          FROM disease_outbreaks o
+          JOIN diseases d ON d.id = o.disease_id
+          WHERE o.id = $${values.length}
+            AND c.disease_type = d.name
+            AND c.reported_time >= o.start_date
+            AND (o.end_date IS NULL OR c.reported_time <= o.end_date)
+        )
+      `);
+    }
+
+    const [row] = await this.dataSource.query(
+      `
+      WITH updated AS (
+        UPDATE cases c
+        SET is_archived = true,
+            archived_at = now()
+        WHERE ${where.join(' AND ')}
+        RETURNING 1
+      )
+      SELECT COUNT(*)::int AS affected FROM updated
+      `,
+      values,
+    );
+
+    return { affected: Number(row?.affected ?? 0) };
+  }
+
+  async unarchiveCases(params: {
+    diseaseType?: string;
+    from?: string;
+    to?: string;
+    outbreakId?: string;
+  }): Promise<{ affected: number }> {
+    const { diseaseType, from, to, outbreakId } = params;
+    const where: string[] = ['c.is_archived IS TRUE'];
+    const values: any[] = [];
+
+    if (diseaseType) {
+      values.push(diseaseType);
+      where.push(`c.disease_type = $${values.length}`);
+    }
+    if (from) {
+      values.push(from);
+      where.push(`c.reported_time >= $${values.length}::timestamptz`);
+    }
+    if (to) {
+      values.push(to);
+      where.push(`c.reported_time <= $${values.length}::timestamptz`);
+    }
+    if (outbreakId) {
+      values.push(outbreakId);
+      where.push(`
+        EXISTS (
+          SELECT 1
+          FROM disease_outbreaks o
+          JOIN diseases d ON d.id = o.disease_id
+          WHERE o.id = $${values.length}
+            AND c.disease_type = d.name
+            AND c.reported_time >= o.start_date
+            AND (o.end_date IS NULL OR c.reported_time <= o.end_date)
+        )
+      `);
+    }
+
+    const [row] = await this.dataSource.query(
+      `
+      WITH updated AS (
+        UPDATE cases c
+        SET is_archived = false,
+            archived_at = NULL
+        WHERE ${where.join(' AND ')}
+        RETURNING 1
+      )
+      SELECT COUNT(*)::int AS affected FROM updated
+      `,
+      values,
+    );
+
+    return { affected: Number(row?.affected ?? 0) };
+  }
+
   async getRegionsGeoJSON() {
     const [row] = await this.dataSource.query(`
       SELECT jsonb_build_object(
@@ -66,11 +229,18 @@ export class GisService {
     status?: string;
     from?: string;
     to?: string;
+    outbreakId?: string;
+    includeArchived?: boolean;
   }) {
-    const { diseaseType, status, from, to } = params;
+    const { diseaseType, status, from, to, outbreakId, includeArchived } =
+      params;
 
     const where: string[] = [];
     const values: any[] = [];
+
+    if (!includeArchived) {
+      where.push(`c.is_archived IS NOT TRUE`);
+    }
 
     if (diseaseType) {
       values.push(diseaseType);
@@ -87,6 +257,21 @@ export class GisService {
     if (to) {
       values.push(to);
       where.push(`c.reported_time <= $${values.length}::timestamptz`);
+    }
+
+    if (outbreakId) {
+      values.push(outbreakId);
+      where.push(`
+        EXISTS (
+          SELECT 1
+          FROM disease_outbreaks o
+          JOIN diseases d ON d.id = o.disease_id
+          WHERE o.id = $${values.length}
+            AND c.disease_type = d.name
+            AND c.reported_time >= o.start_date
+            AND (o.end_date IS NULL OR c.reported_time <= o.end_date)
+        )
+      `);
     }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -112,6 +297,8 @@ export class GisService {
               'patient_age', c.patient_age,
               'patient_gender', c.patient_gender,
               'notes', c.notes,
+              'outbreak_id', c.outbreak_id,
+              'is_archived', COALESCE(c.is_archived, false),
               'lat', ST_Y(c.geom::geometry),
               'lon', ST_X(c.geom::geometry)
             )
@@ -143,6 +330,9 @@ export class GisService {
       c.patient_age,
       c.patient_gender,
       c.notes,
+      c.outbreak_id,
+      COALESCE(c.is_archived, false) AS is_archived,
+      c.archived_at,
       ST_Y(c.geom) AS lat,
       ST_X(c.geom) AS lon,
       COALESCE(r."TinhThanh", c.admin_unit_text) AS region_name
@@ -168,6 +358,8 @@ export class GisService {
     page?: number;
     limit?: number;
     search?: string;
+    outbreakId?: string;
+    includeArchived?: boolean;
   }) {
     const {
       diseaseType,
@@ -177,10 +369,16 @@ export class GisService {
       page = 1,
       limit = 50,
       search,
+      outbreakId,
+      includeArchived,
     } = params;
 
     const where: string[] = [];
     const values: any[] = [];
+
+    if (!includeArchived) {
+      where.push(`c.is_archived IS NOT TRUE`);
+    }
 
     if (diseaseType) {
       values.push(diseaseType);
@@ -203,6 +401,21 @@ export class GisService {
       where.push(
         `(c.external_id ILIKE $${values.length} OR c.patient_name ILIKE $${values.length})`,
       );
+    }
+
+    if (outbreakId) {
+      values.push(outbreakId);
+      where.push(`
+        EXISTS (
+          SELECT 1
+          FROM disease_outbreaks o
+          JOIN diseases d ON d.id = o.disease_id
+          WHERE o.id = $${values.length}
+            AND c.disease_type = d.name
+            AND c.reported_time >= o.start_date
+            AND (o.end_date IS NULL OR c.reported_time <= o.end_date)
+        )
+      `);
     }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -229,6 +442,9 @@ export class GisService {
         c.patient_age,
         c.patient_gender,
         c.notes,
+        c.outbreak_id,
+        COALESCE(c.is_archived, false) AS is_archived,
+        c.archived_at,
         ST_Y(c.geom::geometry) AS lat,
         ST_X(c.geom::geometry) AS lon,
         COALESCE(r."TinhThanh", c.admin_unit_text) AS region_name
@@ -267,12 +483,20 @@ export class GisService {
 
     const dbStatus = this.normalizeStatusForDb(status);
 
+    const outbreakId =
+      dto.outbreak_id ??
+      (await this.resolveOutbreakIdForCase({
+        diseaseType: disease_type,
+        reportedTime: reported_time,
+      }));
+
     const [result] = await this.dataSource.query(
       `
       WITH inserted AS (
         INSERT INTO cases (
           disease_type, status, severity, reported_time, geom, 
-          region_id, admin_unit_text, patient_name, patient_age, patient_gender, notes
+          region_id, admin_unit_text, patient_name, patient_age, patient_gender, notes,
+          outbreak_id
         )
         VALUES (
           $1, $2, $3, $4::timestamptz, ST_SetSRID(ST_MakePoint($5, $6), 4326),
@@ -281,11 +505,12 @@ export class GisService {
             (SELECT id FROM regions WHERE ST_Contains(geom, ST_SetSRID(ST_MakePoint($5, $6), 4326)) LIMIT 1)
           ),
           (SELECT "TinhThanh" FROM regions WHERE ST_Contains(geom, ST_SetSRID(ST_MakePoint($5, $6), 4326)) LIMIT 1),
-          $8, $9, $10, $11
+          $8, $9, $10, $11,
+          $12
         )
         RETURNING *
       )
-      SELECT id, external_id, disease_type, status, severity, reported_time, region_id, admin_unit_text, patient_name, patient_age, patient_gender, notes 
+      SELECT id, external_id, disease_type, status, severity, reported_time, region_id, admin_unit_text, patient_name, patient_age, patient_gender, notes, outbreak_id, COALESCE(is_archived, false) AS is_archived, archived_at
       FROM inserted
       `,
       [
@@ -300,6 +525,7 @@ export class GisService {
         patient_age || null,
         patient_gender || null,
         notes || null,
+        outbreakId,
       ],
     );
 
@@ -340,6 +566,9 @@ export class GisService {
     if (dto.patient_gender !== undefined)
       updates.push(`patient_gender = ${push(dto.patient_gender)}`);
     if (dto.notes !== undefined) updates.push(`notes = ${push(dto.notes)}`);
+
+    if (dto.outbreak_id !== undefined)
+      updates.push(`outbreak_id = ${push(dto.outbreak_id)}`);
 
     // geom + region_id logic
     const hasLat = dto.lat !== undefined;
@@ -409,11 +638,18 @@ export class GisService {
     status?: string;
     from?: string;
     to?: string;
+    outbreakId?: string;
+    includeArchived?: boolean;
   }) {
-    const { diseaseType, regionName, status, from, to } = params;
+    const { diseaseType, regionName, status, from, to, outbreakId, includeArchived } =
+      params;
 
     const where: string[] = [];
     const values: any[] = [];
+
+    if (!includeArchived) {
+      where.push(`c.is_archived IS NOT TRUE`);
+    }
 
     if (diseaseType) {
       values.push(diseaseType);
@@ -437,6 +673,21 @@ export class GisService {
     if (to) {
       values.push(to);
       where.push(`c.reported_time <= $${values.length}::timestamptz`);
+    }
+
+    if (outbreakId) {
+      values.push(outbreakId);
+      where.push(`
+        EXISTS (
+          SELECT 1
+          FROM disease_outbreaks o
+          JOIN diseases d ON d.id = o.disease_id
+          WHERE o.id = $${values.length}
+            AND c.disease_type = d.name
+            AND c.reported_time >= o.start_date
+            AND (o.end_date IS NULL OR c.reported_time <= o.end_date)
+        )
+      `);
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
@@ -593,11 +844,26 @@ export class GisService {
     to?: string;
     gridSize?: number; // Grid cell size in degrees (default 0.1 ~ 11km)
     bounds?: { north: number; south: number; east: number; west: number };
+    outbreakId?: string;
+    includeArchived?: boolean;
   }) {
-    const { diseaseType, status, from, to, gridSize = 0.1, bounds } = params;
+    const {
+      diseaseType,
+      status,
+      from,
+      to,
+      gridSize = 0.1,
+      bounds,
+      outbreakId,
+      includeArchived,
+    } = params;
 
     const where: string[] = [];
     const values: any[] = [];
+
+    if (!includeArchived) {
+      where.push(`c.is_archived IS NOT TRUE`);
+    }
 
     if (diseaseType) {
       values.push(diseaseType);
@@ -614,6 +880,21 @@ export class GisService {
     if (to) {
       values.push(to);
       where.push(`c.reported_time <= $${values.length}::timestamptz`);
+    }
+
+    if (outbreakId) {
+      values.push(outbreakId);
+      where.push(`
+        EXISTS (
+          SELECT 1
+          FROM disease_outbreaks o
+          JOIN diseases d ON d.id = o.disease_id
+          WHERE o.id = $${values.length}
+            AND c.disease_type = d.name
+            AND c.reported_time >= o.start_date
+            AND (o.end_date IS NULL OR c.reported_time <= o.end_date)
+        )
+      `);
     }
 
     // Optional bounds filter
@@ -771,6 +1052,8 @@ export class GisService {
     clusterDistanceKm?: number; // Preferred: distance in kilometers
     minPoints?: number;
     includeNoise?: boolean;
+    outbreakId?: string;
+    includeArchived?: boolean;
   }) {
     const {
       diseaseType,
@@ -781,10 +1064,16 @@ export class GisService {
       clusterDistanceKm,
       minPoints = 4,
       includeNoise = false,
+      outbreakId,
+      includeArchived,
     } = params;
 
     const where: string[] = [];
     const values: any[] = [];
+
+    if (!includeArchived) {
+      where.push(`c.is_archived IS NOT TRUE`);
+    }
 
     if (diseaseType) {
       values.push(diseaseType);
@@ -801,6 +1090,21 @@ export class GisService {
     if (to) {
       values.push(to);
       where.push(`c.reported_time <= $${values.length}::timestamptz`);
+    }
+
+    if (outbreakId) {
+      values.push(outbreakId);
+      where.push(`
+        EXISTS (
+          SELECT 1
+          FROM disease_outbreaks o
+          JOIN diseases d ON d.id = o.disease_id
+          WHERE o.id = $${values.length}
+            AND c.disease_type = d.name
+            AND c.reported_time >= o.start_date
+            AND (o.end_date IS NULL OR c.reported_time <= o.end_date)
+        )
+      `);
     }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';

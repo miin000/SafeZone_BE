@@ -14,6 +14,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { GisService } from './gis.service';
 import { CreateCaseDto } from './dto/create-case.dto';
 import { UpdateCaseDto } from './dto/update-case.dto';
+import { ArchiveCasesDto } from './dto/archive-cases.dto';
 import { AuditLogService } from '../admin/audit-log.service';
 import { AuditAction, AuditResource } from '../admin/entities/audit-log.entity';
 
@@ -35,8 +36,17 @@ export class GisController {
     @Query('status') status?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('outbreakId') outbreakId?: string,
+    @Query('includeArchived') includeArchived?: string,
   ) {
-    return this.gisService.getCasesGeoJSON({ diseaseType, status, from, to });
+    return this.gisService.getCasesGeoJSON({
+      diseaseType,
+      status,
+      from,
+      to,
+      outbreakId,
+      includeArchived: includeArchived === '1' || includeArchived === 'true',
+    });
   }
 
   @Get('cases/list')
@@ -48,6 +58,8 @@ export class GisController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
+    @Query('outbreakId') outbreakId?: string,
+    @Query('includeArchived') includeArchived?: string,
   ) {
     return this.gisService.getCasesList({
       diseaseType,
@@ -57,6 +69,8 @@ export class GisController {
       page: page ? parseInt(page, 10) : 1,
       limit: limit ? parseInt(limit, 10) : 50,
       search,
+      outbreakId,
+      includeArchived: includeArchived === '1' || includeArchived === 'true',
     });
   }
 
@@ -135,6 +149,42 @@ export class GisController {
     return result;
   }
 
+  // Admin: bulk archive cases so they stop showing on map by default
+  @Post('cases/archive')
+  @UseGuards(AuthGuard('jwt'))
+  async archiveCases(@Body() dto: ArchiveCasesDto, @Req() req: any) {
+    const result = await this.gisService.archiveCases(dto);
+
+    this.auditLogService.log(
+      req.user.id,
+      AuditAction.UPDATE,
+      AuditResource.CASE,
+      'bulk',
+      `Archived cases (bulk)`,
+      { filter: dto, affected: result.affected },
+    );
+
+    return result;
+  }
+
+  // Admin: bulk unarchive cases to show them again
+  @Post('cases/unarchive')
+  @UseGuards(AuthGuard('jwt'))
+  async unarchiveCases(@Body() dto: ArchiveCasesDto, @Req() req: any) {
+    const result = await this.gisService.unarchiveCases(dto);
+
+    this.auditLogService.log(
+      req.user.id,
+      AuditAction.UPDATE,
+      AuditResource.CASE,
+      'bulk',
+      `Unarchived cases (bulk)`,
+      { filter: dto, affected: result.affected },
+    );
+
+    return result;
+  }
+
   @Get('stats')
   getStats(
     @Query('diseaseType') diseaseType?: string,
@@ -142,6 +192,8 @@ export class GisController {
     @Query('status') status?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('outbreakId') outbreakId?: string,
+    @Query('includeArchived') includeArchived?: string,
   ) {
     return this.gisService.getStats({
       diseaseType,
@@ -149,6 +201,8 @@ export class GisController {
       status,
       from,
       to,
+      outbreakId,
+      includeArchived: includeArchived === '1' || includeArchived === 'true',
     });
   }
 
@@ -163,6 +217,8 @@ export class GisController {
     @Query('south') south?: string,
     @Query('east') east?: string,
     @Query('west') west?: string,
+    @Query('outbreakId') outbreakId?: string,
+    @Query('includeArchived') includeArchived?: string,
   ) {
     const bounds =
       north && south && east && west
@@ -181,6 +237,8 @@ export class GisController {
       to,
       gridSize: gridSize ? parseFloat(gridSize) : 0.1,
       bounds,
+      outbreakId,
+      includeArchived: includeArchived === '1' || includeArchived === 'true',
     });
   }
 
@@ -194,6 +252,8 @@ export class GisController {
     @Query('clusterDistanceKm') clusterDistanceKm?: string,
     @Query('minPoints') minPoints?: string,
     @Query('includeNoise') includeNoise?: string,
+    @Query('outbreakId') outbreakId?: string,
+    @Query('includeArchived') includeArchived?: string,
   ) {
     return this.gisService.getClusteredCases({
       diseaseType,
@@ -206,6 +266,8 @@ export class GisController {
         : undefined,
       minPoints: minPoints ? parseInt(minPoints, 10) : 4,
       includeNoise: includeNoise === '1' || includeNoise === 'true',
+      outbreakId,
+      includeArchived: includeArchived === '1' || includeArchived === 'true',
     });
   }
 
