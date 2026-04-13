@@ -174,7 +174,9 @@ export class DiseaseOutbreakService implements OnModuleInit {
   }
 
   async listByDisease(diseaseId: string): Promise<DiseaseOutbreak[]> {
-    const disease = await this.diseaseRepository.findOne({ where: { id: diseaseId } });
+    const disease = await this.diseaseRepository.findOne({
+      where: { id: diseaseId },
+    });
     if (!disease) throw new NotFoundException('Disease not found');
 
     return this.outbreakRepository.find({
@@ -187,7 +189,9 @@ export class DiseaseOutbreakService implements OnModuleInit {
     diseaseId: string,
     dto: CreateOutbreakDto,
   ): Promise<DiseaseOutbreak> {
-    const disease = await this.diseaseRepository.findOne({ where: { id: diseaseId } });
+    const disease = await this.diseaseRepository.findOne({
+      where: { id: diseaseId },
+    });
     if (!disease) throw new NotFoundException('Disease not found');
 
     const startDate = dto.startDate ? new Date(dto.startDate) : new Date();
@@ -204,7 +208,9 @@ export class DiseaseOutbreakService implements OnModuleInit {
         where: { diseaseId, status: 'active' },
       });
       if (active) {
-        throw new ConflictException('This disease already has an active outbreak');
+        throw new ConflictException(
+          'This disease already has an active outbreak',
+        );
       }
     }
 
@@ -228,8 +234,13 @@ export class DiseaseOutbreakService implements OnModuleInit {
     return saved;
   }
 
-  async close(outbreakId: string, dto: CloseOutbreakDto): Promise<DiseaseOutbreak> {
-    const outbreak = await this.outbreakRepository.findOne({ where: { id: outbreakId } });
+  async close(
+    outbreakId: string,
+    dto: CloseOutbreakDto,
+  ): Promise<DiseaseOutbreak> {
+    const outbreak = await this.outbreakRepository.findOne({
+      where: { id: outbreakId },
+    });
     if (!outbreak) throw new NotFoundException('Outbreak not found');
 
     if (outbreak.status === 'closed') return outbreak;
@@ -249,7 +260,9 @@ export class DiseaseOutbreakService implements OnModuleInit {
   }
 
   async reopen(outbreakId: string): Promise<DiseaseOutbreak> {
-    const outbreak = await this.outbreakRepository.findOne({ where: { id: outbreakId } });
+    const outbreak = await this.outbreakRepository.findOne({
+      where: { id: outbreakId },
+    });
     if (!outbreak) throw new NotFoundException('Outbreak not found');
 
     if (outbreak.status === 'active') return outbreak;
@@ -258,7 +271,9 @@ export class DiseaseOutbreakService implements OnModuleInit {
       where: { diseaseId: outbreak.diseaseId, status: 'active' },
     });
     if (active) {
-      throw new ConflictException('This disease already has another active outbreak');
+      throw new ConflictException(
+        'This disease already has another active outbreak',
+      );
     }
 
     outbreak.status = 'active';
@@ -279,11 +294,15 @@ export class DiseaseOutbreakService implements OnModuleInit {
     outbreakId: string,
     dto: NewOutbreakFromOldDto,
   ): Promise<{ closedOld: DiseaseOutbreak; newOutbreak: DiseaseOutbreak }> {
-    const oldOutbreak = await this.outbreakRepository.findOne({ where: { id: outbreakId } });
+    const oldOutbreak = await this.outbreakRepository.findOne({
+      where: { id: outbreakId },
+    });
     if (!oldOutbreak) throw new NotFoundException('Outbreak not found');
 
     const closeOldAt = dto.closeOldAt ? new Date(dto.closeOldAt) : new Date();
-    const closedOld = await this.close(outbreakId, { endDate: closeOldAt.toISOString() });
+    const closedOld = await this.close(outbreakId, {
+      endDate: closeOldAt.toISOString(),
+    });
 
     const newOutbreak = this.outbreakRepository.create({
       diseaseId: oldOutbreak.diseaseId,
@@ -300,25 +319,35 @@ export class DiseaseOutbreakService implements OnModuleInit {
     return { closedOld, newOutbreak: savedNew };
   }
 
-  async update(outbreakId: string, dto: UpdateOutbreakDto): Promise<DiseaseOutbreak> {
+  async update(
+    outbreakId: string,
+    dto: UpdateOutbreakDto,
+  ): Promise<DiseaseOutbreak> {
     const outbreak = await this.outbreakRepository.findOne({
       where: { id: outbreakId },
     });
     if (!outbreak) throw new NotFoundException('Outbreak not found');
 
-    const nextStartDate = dto.startDate ? new Date(dto.startDate) : outbreak.startDate;
-    const nextEndDate = dto.endDate !== undefined
-      ? (dto.endDate ? new Date(dto.endDate) : null)
-      : outbreak.endDate;
+    const nextStartDate = dto.startDate
+      ? new Date(dto.startDate)
+      : outbreak.startDate;
+    const nextEndDate =
+      dto.endDate !== undefined
+        ? dto.endDate
+          ? new Date(dto.endDate)
+          : null
+        : outbreak.endDate;
 
     if (nextEndDate) {
       this.assertValidEndDate({ startDate: nextStartDate }, nextEndDate);
     }
 
-    outbreak.name = dto.name !== undefined ? (dto.name?.trim() || null) : outbreak.name;
-    outbreak.description = dto.description !== undefined
-      ? (dto.description?.trim() || null)
-      : outbreak.description;
+    outbreak.name =
+      dto.name !== undefined ? dto.name?.trim() || null : outbreak.name;
+    outbreak.description =
+      dto.description !== undefined
+        ? dto.description?.trim() || null
+        : outbreak.description;
     outbreak.startDate = nextStartDate;
     outbreak.endDate = nextEndDate;
 

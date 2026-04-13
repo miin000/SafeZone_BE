@@ -93,9 +93,8 @@ export class ReportService {
       async (manager) => {
         const txUserRepository = manager.getRepository(User);
         const txReportRepository = manager.getRepository(Report);
-        const txStatusHistoryRepository = manager.getRepository(
-          ReportStatusHistory,
-        );
+        const txStatusHistoryRepository =
+          manager.getRepository(ReportStatusHistory);
 
         const user = await txUserRepository
           .createQueryBuilder('user')
@@ -508,7 +507,67 @@ export class ReportService {
       { classification },
     );
 
-    const createdCase = undefined;
+    let createdCase: any = undefined;
+
+    // Optional: create a case on the GIS map.
+    // Business rule: only allow creating a case from a detailed report.
+    if (
+      _createCase &&
+      report.isDetailedReport &&
+      classification !== 'false_alarm'
+    ) {
+      const lat = Number(report.latitude);
+      const lon = Number(report.longitude);
+      const hasValidCoords =
+        Number.isFinite(lat) &&
+        Number.isFinite(lon) &&
+        Math.abs(lat) <= 90 &&
+        Math.abs(lon) <= 180 &&
+        !(lat === 0 && lon === 0);
+
+      if (!hasValidCoords) {
+        throw new BadRequestException(
+          'Không thể tạo ca bệnh vì tọa độ báo cáo không hợp lệ',
+        );
+      }
+
+      const severityMap: Record<string, number> = {
+        low: 1,
+        medium: 1,
+        high: 2,
+        critical: 3,
+      };
+
+      const patientName =
+        report.patientInfo?.fullName || report.reporterName || undefined;
+      const patientAge =
+        typeof report.patientInfo?.age === 'number'
+          ? report.patientInfo?.age
+          : undefined;
+      const patientGender = report.patientInfo?.gender || undefined;
+
+      const evidenceCount =
+        (report.imageUrls?.length || 0) +
+        (report.testResultImageUrls?.length || 0) +
+        (report.medicalCertImageUrls?.length || 0);
+
+      createdCase = await this.gisService.createCase({
+        disease_type: report.diseaseType,
+        status: 'suspected',
+        severity: severityMap[String(report.severityLevel || 'medium')] || 1,
+        reported_time: (report.createdAt || new Date()).toISOString(),
+        lat,
+        lon,
+        patient_name: patientName,
+        patient_age: patientAge,
+        patient_gender: patientGender,
+        notes:
+          `From report ${report.id}. ` +
+          `Official classification: ${classification}. ` +
+          `Evidence images: ${evidenceCount}. ` +
+          (note ? `Official note: ${note}` : ''),
+      });
+    }
 
     const classLabels = {
       suspected: 'Nghi ngờ',
@@ -755,7 +814,61 @@ export class ReportService {
       adminNote,
     );
 
-    const createdCase = undefined;
+    let createdCase: any = undefined;
+
+    // Legacy: allow creating case only for detailed reports.
+    if (
+      _createCase &&
+      report.isDetailedReport &&
+      (status === ReportStatus.VERIFIED || status === ReportStatus.CONFIRMED)
+    ) {
+      const lat = Number(report.latitude);
+      const lon = Number(report.longitude);
+      const hasValidCoords =
+        Number.isFinite(lat) &&
+        Number.isFinite(lon) &&
+        Math.abs(lat) <= 90 &&
+        Math.abs(lon) <= 180 &&
+        !(lat === 0 && lon === 0);
+
+      if (!hasValidCoords) {
+        throw new BadRequestException(
+          'Không thể tạo ca bệnh vì tọa độ báo cáo không hợp lệ',
+        );
+      }
+
+      const severityMap: Record<string, number> = {
+        low: 1,
+        medium: 1,
+        high: 2,
+        critical: 3,
+      };
+
+      const evidenceCount =
+        (report.imageUrls?.length || 0) +
+        (report.testResultImageUrls?.length || 0) +
+        (report.medicalCertImageUrls?.length || 0);
+
+      createdCase = await this.gisService.createCase({
+        disease_type: report.diseaseType,
+        status: 'suspected',
+        severity: severityMap[String(report.severityLevel || 'medium')] || 1,
+        reported_time: (report.createdAt || new Date()).toISOString(),
+        lat,
+        lon,
+        patient_name:
+          report.patientInfo?.fullName || report.reporterName || undefined,
+        patient_age:
+          typeof report.patientInfo?.age === 'number'
+            ? report.patientInfo?.age
+            : undefined,
+        patient_gender: report.patientInfo?.gender || undefined,
+        notes:
+          `From report ${report.id}. ` +
+          `Evidence images: ${evidenceCount}. ` +
+          (adminNote ? `Admin note: ${adminNote}` : ''),
+      });
+    }
 
     if (report.userId) {
       const statusMessages = {
@@ -788,7 +901,11 @@ export class ReportService {
           message.title,
           message.body,
           NotificationType.REPORT_UPDATE,
-          { reportId: id, status: report.status, diseaseType: report.diseaseType },
+          {
+            reportId: id,
+            status: report.status,
+            diseaseType: report.diseaseType,
+          },
         );
       }
     }

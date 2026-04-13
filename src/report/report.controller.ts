@@ -198,6 +198,7 @@ export class ReportController {
       req.user.role,
       dto.classification,
       dto.note,
+      dto.createCase,
     );
 
     this.auditLogService.log(

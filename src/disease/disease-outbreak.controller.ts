@@ -41,7 +41,10 @@ export class DiseaseOutbreakController {
   // Admin: close outbreak (and archive its cases)
   @UseGuards(AuthGuard('jwt'))
   @Patch('outbreaks/:outbreakId/close')
-  close(@Param('outbreakId') outbreakId: string, @Body() dto: CloseOutbreakDto) {
+  close(
+    @Param('outbreakId') outbreakId: string,
+    @Body() dto: CloseOutbreakDto,
+  ) {
     return this.outbreakService.close(outbreakId, dto);
   }
 

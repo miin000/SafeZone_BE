@@ -269,11 +269,7 @@ export class ZoneService implements OnModuleInit {
   }
 
   async findAll(params: FindAllZoneParams = {}): Promise<EpidemicZone[]> {
-    const {
-      onlyActive = true,
-      lifecycleStatus,
-      source,
-    } = params;
+    const { onlyActive = true, lifecycleStatus, source } = params;
 
     await this.syncCaseCountsFromReports();
 
@@ -308,7 +304,7 @@ export class ZoneService implements OnModuleInit {
           return zone;
         }
 
-        const metadata = (zone.proposalMetadata || {}) as Record<string, any>;
+        const metadata = zone.proposalMetadata || {};
         const clusterCaseCount = Number(metadata?.clusterCaseCount ?? NaN);
         const radiusCaseCount = await this.countCasesInZoneRadius(zone, {
           from: metadata?.parameters?.from,
@@ -357,9 +353,9 @@ export class ZoneService implements OnModuleInit {
         )`,
         { lat, lon, radius: radiusKm * 1000 },
       )
-        .andWhere('zone.lifecycleStatus = :lifecycleStatus', {
-          lifecycleStatus: ZoneLifecycleStatus.APPROVED,
-        })
+      .andWhere('zone.lifecycleStatus = :lifecycleStatus', {
+        lifecycleStatus: ZoneLifecycleStatus.APPROVED,
+      })
       .andWhere('zone.isActive = :isActive', { isActive: true })
       .andWhere('zone.caseCount > 0')
       .andWhere('(zone."startDate" IS NULL OR zone."startDate" <= NOW())')
@@ -380,9 +376,9 @@ export class ZoneService implements OnModuleInit {
         )`,
         { lat, lon },
       )
-        .andWhere('zone.lifecycleStatus = :lifecycleStatus', {
-          lifecycleStatus: ZoneLifecycleStatus.APPROVED,
-        })
+      .andWhere('zone.lifecycleStatus = :lifecycleStatus', {
+        lifecycleStatus: ZoneLifecycleStatus.APPROVED,
+      })
       .andWhere('zone.isActive = :isActive', { isActive: true })
       .andWhere('zone.caseCount > 0')
       .andWhere('(zone."startDate" IS NULL OR zone."startDate" <= NOW())')
@@ -442,7 +438,7 @@ export class ZoneService implements OnModuleInit {
     note?: string,
   ): Promise<EpidemicZone> {
     const zone = await this.findOne(id);
-    const metadata = (zone.proposalMetadata || {}) as Record<string, any>;
+    const metadata = zone.proposalMetadata || {};
     const clusterCaseCount = Number(metadata?.clusterCaseCount ?? 0);
     const radiusCaseCount = await this.countCasesInZoneRadius(zone, {
       from: metadata?.parameters?.from,
@@ -455,7 +451,11 @@ export class ZoneService implements OnModuleInit {
     zone.reviewedBy = this.normalizeUserId(reviewerId) || zone.reviewedBy;
     zone.reviewNote = note || zone.reviewNote;
     zone.startDate = zone.startDate || new Date();
-    zone.caseCount = Math.max(Number(zone.caseCount || 0), clusterCaseCount, radiusCaseCount);
+    zone.caseCount = Math.max(
+      Number(zone.caseCount || 0),
+      clusterCaseCount,
+      radiusCaseCount,
+    );
     zone.proposalMetadata = {
       ...metadata,
       clusterCaseCount,
@@ -602,7 +602,8 @@ export class ZoneService implements OnModuleInit {
         acc.skipped.clusterTooSmall += s.skipped.clusterTooSmall;
         acc.skipped.lowConfidence += s.skipped.lowConfidence;
         acc.skipped.invalidCenter += s.skipped.invalidCenter;
-        acc.skipped.overlapWithExistingZone += s.skipped.overlapWithExistingZone;
+        acc.skipped.overlapWithExistingZone +=
+          s.skipped.overlapWithExistingZone;
         return acc;
       },
       {
@@ -648,7 +649,11 @@ export class ZoneService implements OnModuleInit {
     const sourceDiseaseTypes = await this.resolveDiseaseTypes(diseaseTypes);
 
     const created: EpidemicZone[] = [];
-    const skipped: Array<{ diseaseType: string; reason: string; clusterId?: string }> = [];
+    const skipped: Array<{
+      diseaseType: string;
+      reason: string;
+      clusterId?: string;
+    }> = [];
 
     for (const diseaseType of sourceDiseaseTypes) {
       const clusterResponse: any = await this.gisService.getClusteredCases({
@@ -703,10 +708,16 @@ export class ZoneService implements OnModuleInit {
 
         const farthestKm = Number(cluster?.spatial?.maxDistanceKm || 0);
         const epsBasedRadius = Math.max(0.3, epsKm * 1.1);
-        const farthestBasedRadius = Math.max(0.3, farthestKm + Math.max(0.25, epsKm * 0.12));
+        const farthestBasedRadius = Math.max(
+          0.3,
+          farthestKm + Math.max(0.25, epsKm * 0.12),
+        );
         const radiusKm = Math.max(
           0.3,
-          Math.min(80, Number(Math.max(epsBasedRadius, farthestBasedRadius).toFixed(2))),
+          Math.min(
+            80,
+            Number(Math.max(epsBasedRadius, farthestBasedRadius).toFixed(2)),
+          ),
         );
         const [nearExisting] = await this.dataSource.query(
           `

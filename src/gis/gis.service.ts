@@ -641,8 +641,15 @@ export class GisService {
     outbreakId?: string;
     includeArchived?: boolean;
   }) {
-    const { diseaseType, regionName, status, from, to, outbreakId, includeArchived } =
-      params;
+    const {
+      diseaseType,
+      regionName,
+      status,
+      from,
+      to,
+      outbreakId,
+      includeArchived,
+    } = params;
 
     const where: string[] = [];
     const values: any[] = [];
@@ -1113,7 +1120,8 @@ export class GisService {
       ? Math.max(1, Math.floor(minPoints))
       : 4;
     const epsDegrees =
-      typeof clusterDistanceKm === 'number' && Number.isFinite(clusterDistanceKm)
+      typeof clusterDistanceKm === 'number' &&
+      Number.isFinite(clusterDistanceKm)
         ? Math.max(clusterDistanceKm, 0.001) / 111
         : Math.max(clusterDistance, 0.0001);
     const epsKmApprox = epsDegrees * 111;

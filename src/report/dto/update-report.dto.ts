@@ -50,6 +50,16 @@ export class UpdateReportDto {
   imageUrls?: string[];
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  testResultImageUrls?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  medicalCertImageUrls?: string[];
+
+  @IsOptional()
   @IsEnum(ReportStatus)
   status?: ReportStatus;
 

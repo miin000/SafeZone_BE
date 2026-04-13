@@ -141,10 +141,9 @@ export class DiseaseService implements OnModuleInit {
   async search(query: string): Promise<Disease[]> {
     return this.diseaseRepository
       .createQueryBuilder('disease')
-      .where(
-        '(disease.name ILIKE :query OR disease.aliases ILIKE :query)',
-        { query: `%${query}%` },
-      )
+      .where('(disease.name ILIKE :query OR disease.aliases ILIKE :query)', {
+        query: `%${query}%`,
+      })
       .andWhere('disease.isActive = true')
       .orderBy('disease.name', 'ASC')
       .getMany();
