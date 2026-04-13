@@ -5,6 +5,7 @@ import {
   BadRequestException,
   Inject,
   forwardRef,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -24,6 +25,8 @@ import { User } from '../auth/entities/user.entity';
 
 @Injectable()
 export class ReportService {
+  private readonly logger = new Logger(ReportService.name);
+
   constructor(
     @InjectRepository(Report)
     private reportRepository: Repository<Report>,
@@ -65,6 +68,10 @@ export class ReportService {
     userId: string,
     createReportDto: CreateReportDto,
   ): Promise<Report> {
+    this.logger.log(
+      `Create report request userId=${userId} reportType=${createReportDto.reportType ?? 'case_report'} disease=${createReportDto.diseaseType} imageCount=${createReportDto.imageUrls?.length ?? 0} testResultImageCount=${createReportDto.testResultImageUrls?.length ?? 0} medicalCertImageCount=${createReportDto.medicalCertImageUrls?.length ?? 0}`,
+    );
+
     const {
       lat,
       lon,
@@ -318,6 +325,10 @@ export class ReportService {
         status: ReportStatus.SUBMITTED,
         reportType: createReportDto.reportType || 'case_report',
       },
+    );
+
+    this.logger.log(
+      `Create report success reportId=${savedReport.id} userId=${userId} status=${savedReport.status}`,
     );
 
     return savedReport;

@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -15,6 +16,8 @@ import { NotificationType } from '../notification/entities/notification.entity';
 
 @Injectable()
 export class PostService {
+  private readonly logger = new Logger(PostService.name);
+
   constructor(
     @InjectRepository(Post)
     private postRepository: Repository<Post>,
@@ -24,12 +27,22 @@ export class PostService {
   ) {}
 
   async create(userId: string, createPostDto: CreatePostDto): Promise<Post> {
+    this.logger.log(
+      `Create post request userId=${userId} contentLength=${createPostDto.content?.length ?? 0} imageCount=${createPostDto.imageUrls?.length ?? 0} diseaseType=${createPostDto.diseaseType ?? 'n/a'}`,
+    );
+
     const post = this.postRepository.create({
       ...createPostDto,
       userId,
       status: PostStatus.PENDING,
     });
-    return this.postRepository.save(post);
+    const saved = await this.postRepository.save(post);
+
+    this.logger.log(
+      `Create post success postId=${saved.id} userId=${userId} status=${saved.status}`,
+    );
+
+    return saved;
   }
 
   async findAll(queryDto: QueryPostDto) {
