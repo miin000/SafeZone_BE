@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Query,
   Param,
@@ -126,6 +127,27 @@ export class GisController {
       AuditResource.CASE,
       id,
       `Updated case #${id}`,
+      { changes: dto },
+    );
+
+    return updated;
+  }
+
+  @Patch('cases/:id')
+  @UseGuards(AuthGuard('jwt'))
+  async patchCase(
+    @Param('id') id: string,
+    @Body() dto: UpdateCaseDto,
+    @Req() req: any,
+  ) {
+    const updated = await this.gisService.updateCase(id, dto);
+
+    this.auditLogService.log(
+      req.user.id,
+      AuditAction.UPDATE,
+      AuditResource.CASE,
+      id,
+      `Patched case #${id}`,
       { changes: dto },
     );
 
