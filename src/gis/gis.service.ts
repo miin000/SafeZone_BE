@@ -6,6 +6,8 @@ export interface CaseDto {
   id?: string;
   external_id?: string;
   disease_type: string;
+  disease_id?: string;
+  diseaseId?: string;
   status: string;
   severity?: number;
   reported_time: string;
@@ -45,17 +47,23 @@ export class GisService {
   }
 
   private async resolveOutbreakIdForCase(params: {
-    diseaseType: string;
+    diseaseId?: string | null;
+    diseaseType?: string;
     reportedTime: string;
   }): Promise<string | null> {
-    const { diseaseType, reportedTime } = params;
+    const { diseaseId: inputDiseaseId, diseaseType, reportedTime } = params;
 
-    // disease_type in cases is a free text; we only auto-link outbreaks for diseases in catalog
-    const diseaseRows = await this.dataSource.query(
-      `SELECT id FROM diseases WHERE name = $1 LIMIT 1`,
-      [diseaseType],
-    );
-    const diseaseId = diseaseRows?.[0]?.id as string | undefined;
+    // Backward compatible: cases historically used free-text disease_type.
+    // Prefer FK when provided; otherwise try to resolve by disease name.
+    let diseaseId = inputDiseaseId ?? null;
+
+    if (!diseaseId && diseaseType) {
+      const diseaseRows = await this.dataSource.query(
+        `SELECT id FROM diseases WHERE name = $1 LIMIT 1`,
+        [diseaseType],
+      );
+      diseaseId = (diseaseRows?.[0]?.id as string | undefined) ?? null;
+    }
     if (!diseaseId) return null;
 
     const activeRows = await this.dataSource.query(
@@ -110,7 +118,9 @@ export class GisService {
 
     if (diseaseType) {
       values.push(diseaseType);
-      where.push(`c.disease_type = $${values.length}`);
+      where.push(
+        `COALESCE((SELECT d2.name FROM diseases d2 WHERE d2.id = c.disease_id), c.disease_type) = $${values.length}`,
+      );
     }
     if (from) {
       values.push(from);
@@ -128,7 +138,7 @@ export class GisService {
           FROM disease_outbreaks o
           JOIN diseases d ON d.id = o.disease_id
           WHERE o.id = $${values.length}
-            AND c.disease_type = d.name
+            AND (c.disease_id = o.disease_id OR (c.disease_id IS NULL AND c.disease_type = d.name))
             AND c.reported_time >= o.start_date
             AND (o.end_date IS NULL OR c.reported_time <= o.end_date)
         )
@@ -164,7 +174,9 @@ export class GisService {
 
     if (diseaseType) {
       values.push(diseaseType);
-      where.push(`c.disease_type = $${values.length}`);
+      where.push(
+        `COALESCE((SELECT d2.name FROM diseases d2 WHERE d2.id = c.disease_id), c.disease_type) = $${values.length}`,
+      );
     }
     if (from) {
       values.push(from);
@@ -182,7 +194,7 @@ export class GisService {
           FROM disease_outbreaks o
           JOIN diseases d ON d.id = o.disease_id
           WHERE o.id = $${values.length}
-            AND c.disease_type = d.name
+            AND (c.disease_id = o.disease_id OR (c.disease_id IS NULL AND c.disease_type = d.name))
             AND c.reported_time >= o.start_date
             AND (o.end_date IS NULL OR c.reported_time <= o.end_date)
         )
@@ -244,7 +256,7 @@ export class GisService {
 
     if (diseaseType) {
       values.push(diseaseType);
-      where.push(`c.disease_type = $${values.length}`);
+      where.push(`COALESCE(d.name, c.disease_type) = $${values.length}`);
     }
     if (status) {
       values.push(this.normalizeStatusForDb(status));
@@ -267,7 +279,7 @@ export class GisService {
           FROM disease_outbreaks o
           JOIN diseases d ON d.id = o.disease_id
           WHERE o.id = $${values.length}
-            AND c.disease_type = d.name
+            AND (c.disease_id = o.disease_id OR (c.disease_id IS NULL AND c.disease_type = d.name))
             AND c.reported_time >= o.start_date
             AND (o.end_date IS NULL OR c.reported_time <= o.end_date)
         )
@@ -287,7 +299,8 @@ export class GisService {
             'properties', jsonb_build_object(
               'id', c.id,
               'external_id', c.external_id,
-              'disease_type', c.disease_type,
+              'disease_id', c.disease_id,
+              'disease_type', COALESCE(d.name, c.disease_type),
               'status', CASE WHEN c.status = 'died' THEN 'deceased' ELSE c.status END,
               'reported_time', c.reported_time,
               'region_id', c.region_id,
@@ -306,6 +319,7 @@ export class GisService {
         ), '[]'::jsonb)
       ) AS geojson
       FROM cases c
+      LEFT JOIN diseases d ON d.id = c.disease_id
       LEFT JOIN regions r ON r.id = c.region_id
       ${whereSql};
       `,
@@ -321,7 +335,8 @@ export class GisService {
     SELECT
       c.id,
       c.external_id,
-      c.disease_type,
+      c.disease_id,
+      COALESCE(d.name, c.disease_type) AS disease_type,
       CASE WHEN c.status = 'died' THEN 'deceased' ELSE c.status END AS status,
       c.severity,
       c.reported_time,
@@ -337,6 +352,7 @@ export class GisService {
       ST_X(c.geom) AS lon,
       COALESCE(r."TinhThanh", c.admin_unit_text) AS region_name
     FROM cases c
+    LEFT JOIN diseases d ON d.id = c.disease_id
     LEFT JOIN regions r ON r.id = c.region_id
     WHERE c.id = $1
     `,
@@ -382,7 +398,7 @@ export class GisService {
 
     if (diseaseType) {
       values.push(diseaseType);
-      where.push(`c.disease_type = $${values.length}`);
+      where.push(`COALESCE(d.name, c.disease_type) = $${values.length}`);
     }
     if (status) {
       values.push(this.normalizeStatusForDb(status));
@@ -411,7 +427,7 @@ export class GisService {
           FROM disease_outbreaks o
           JOIN diseases d ON d.id = o.disease_id
           WHERE o.id = $${values.length}
-            AND c.disease_type = d.name
+            AND (c.disease_id = o.disease_id OR (c.disease_id IS NULL AND c.disease_type = d.name))
             AND c.reported_time >= o.start_date
             AND (o.end_date IS NULL OR c.reported_time <= o.end_date)
         )
@@ -423,7 +439,12 @@ export class GisService {
 
     // Get total count
     const [countResult] = await this.dataSource.query(
-      `SELECT COUNT(*)::int AS total FROM cases c ${whereSql}`,
+      `
+      SELECT COUNT(*)::int AS total
+      FROM cases c
+      LEFT JOIN diseases d ON d.id = c.disease_id
+      ${whereSql}
+      `,
       values,
     );
 
@@ -433,7 +454,8 @@ export class GisService {
       SELECT
         c.id,
         c.external_id,
-        c.disease_type,
+        c.disease_id,
+        COALESCE(d.name, c.disease_type) AS disease_type,
         CASE WHEN c.status = 'died' THEN 'deceased' ELSE c.status END AS status,
         c.severity,
         c.reported_time,
@@ -449,6 +471,7 @@ export class GisService {
         ST_X(c.geom::geometry) AS lon,
         COALESCE(r."TinhThanh", c.admin_unit_text) AS region_name
       FROM cases c
+      LEFT JOIN diseases d ON d.id = c.disease_id
       LEFT JOIN regions r ON r.id = c.region_id
       ${whereSql}
       ORDER BY c.reported_time DESC
@@ -469,6 +492,8 @@ export class GisService {
   async createCase(dto: CaseDto) {
     const {
       disease_type,
+      disease_id,
+      diseaseId,
       status,
       severity = 1,
       reported_time,
@@ -481,11 +506,23 @@ export class GisService {
       notes,
     } = dto;
 
+    const resolvedDiseaseIdRows =
+      disease_id || diseaseId
+        ? null
+        : await this.dataSource.query(
+            `SELECT id FROM diseases WHERE name = $1 LIMIT 1`,
+            [disease_type],
+          );
+
+    const resolvedDiseaseId: string | null =
+      (disease_id ?? diseaseId ?? resolvedDiseaseIdRows?.[0]?.id) || null;
+
     const dbStatus = this.normalizeStatusForDb(status);
 
     const outbreakId =
       dto.outbreak_id ??
       (await this.resolveOutbreakIdForCase({
+        diseaseId: resolvedDiseaseId,
         diseaseType: disease_type,
         reportedTime: reported_time,
       }));
@@ -494,26 +531,44 @@ export class GisService {
       `
       WITH inserted AS (
         INSERT INTO cases (
-          disease_type, status, severity, reported_time, geom, 
+          disease_id, disease_type, status, severity, reported_time, geom, 
           region_id, admin_unit_text, patient_name, patient_age, patient_gender, notes,
           outbreak_id
         )
         VALUES (
-          $1, $2, $3, $4::timestamptz, ST_SetSRID(ST_MakePoint($5, $6), 4326),
+          $1, $2, $3, $4, $5::timestamptz, ST_SetSRID(ST_MakePoint($6, $7), 4326),
           COALESCE(
-            $7, 
-            (SELECT id FROM regions WHERE ST_Contains(geom, ST_SetSRID(ST_MakePoint($5, $6), 4326)) LIMIT 1)
+            $8, 
+            (SELECT id FROM regions WHERE ST_Contains(geom, ST_SetSRID(ST_MakePoint($6, $7), 4326)) LIMIT 1)
           ),
-          (SELECT "TinhThanh" FROM regions WHERE ST_Contains(geom, ST_SetSRID(ST_MakePoint($5, $6), 4326)) LIMIT 1),
-          $8, $9, $10, $11,
-          $12
+          (SELECT "TinhThanh" FROM regions WHERE ST_Contains(geom, ST_SetSRID(ST_MakePoint($6, $7), 4326)) LIMIT 1),
+          $9, $10, $11, $12,
+          $13
         )
         RETURNING *
       )
-      SELECT id, external_id, disease_type, status, severity, reported_time, region_id, admin_unit_text, patient_name, patient_age, patient_gender, notes, outbreak_id, COALESCE(is_archived, false) AS is_archived, archived_at
-      FROM inserted
+      SELECT
+        i.id,
+        i.external_id,
+        i.disease_id,
+        COALESCE(d.name, i.disease_type) AS disease_type,
+        i.status,
+        i.severity,
+        i.reported_time,
+        i.region_id,
+        i.admin_unit_text,
+        i.patient_name,
+        i.patient_age,
+        i.patient_gender,
+        i.notes,
+        i.outbreak_id,
+        COALESCE(i.is_archived, false) AS is_archived,
+        i.archived_at
+      FROM inserted i
+      LEFT JOIN diseases d ON d.id = i.disease_id
       `,
       [
+        resolvedDiseaseId,
         disease_type,
         dbStatus,
         severity,
@@ -546,6 +601,20 @@ export class GisService {
       values.push(val);
       return `$${values.length}`;
     };
+
+    // Keep FK in sync: if client updates disease_id explicitly, use it.
+    // Otherwise, if disease_type changes, resolve disease_id from catalog (or set NULL if not found).
+    if (dto.disease_id !== undefined || dto.diseaseId !== undefined) {
+      const nextDiseaseId = (dto.disease_id ?? dto.diseaseId) || null;
+      updates.push(`disease_id = ${push(nextDiseaseId)}`);
+    } else if (dto.disease_type !== undefined) {
+      const rows = await this.dataSource.query(
+        `SELECT id FROM diseases WHERE name = $1 LIMIT 1`,
+        [dto.disease_type],
+      );
+      const nextDiseaseId = (rows?.[0]?.id as string | undefined) ?? null;
+      updates.push(`disease_id = ${push(nextDiseaseId)}`);
+    }
 
     if (dto.disease_type !== undefined)
       updates.push(`disease_type = ${push(dto.disease_type)}`);
@@ -660,7 +729,9 @@ export class GisService {
 
     if (diseaseType) {
       values.push(diseaseType);
-      where.push(`c.disease_type = $${values.length}`);
+      where.push(
+        `COALESCE((SELECT d2.name FROM diseases d2 WHERE d2.id = c.disease_id), c.disease_type) = $${values.length}`,
+      );
     }
     if (regionName) {
       values.push(regionName);
@@ -690,7 +761,7 @@ export class GisService {
           FROM disease_outbreaks o
           JOIN diseases d ON d.id = o.disease_id
           WHERE o.id = $${values.length}
-            AND c.disease_type = d.name
+            AND (c.disease_id = o.disease_id OR (c.disease_id IS NULL AND c.disease_type = d.name))
             AND c.reported_time >= o.start_date
             AND (o.end_date IS NULL OR c.reported_time <= o.end_date)
         )
@@ -746,10 +817,12 @@ export class GisService {
     // Theo disease_type
     const byDisease = await this.dataSource.query(
       `
-      SELECT c.disease_type, COUNT(*)::int AS total
+      SELECT
+        COALESCE((SELECT d2.name FROM diseases d2 WHERE d2.id = c.disease_id), c.disease_type) AS disease_type,
+        COUNT(*)::int AS total
       FROM cases c
       ${whereSql}
-      GROUP BY c.disease_type
+      GROUP BY 1
       ORDER BY total DESC;
       `,
       values,

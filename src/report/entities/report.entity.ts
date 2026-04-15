@@ -86,6 +86,10 @@ export class Report {
   @Column()
   diseaseType: string;
 
+  @Column({ type: 'uuid', nullable: true })
+  @Index()
+  diseaseId: string | null;
+
   @Column('text')
   description: string;
 

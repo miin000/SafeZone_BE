@@ -10,28 +10,31 @@ import { Point } from 'geojson';
 @Entity('cases')
 export class Case {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ type: 'text', nullable: true, unique: true })
-  external_id: string | null;
+  external_id!: string | null;
 
   @Column({ type: 'text' })
-  disease_type: string;
+  disease_type!: string;
+
+  @Column({ type: 'uuid', nullable: true })
+  disease_id!: string | null;
 
   @Column({ type: 'text' })
-  status: string;
+  status!: string;
 
   @Column({ type: 'smallint', nullable: true })
-  severity: number | null;
+  severity!: number | null;
 
   @Column({ type: 'timestamptz', nullable: true })
-  reported_time: Date | null;
+  reported_time!: Date | null;
 
   @Column({ type: 'text', nullable: true })
-  admin_unit_text: string | null;
+  admin_unit_text!: string | null;
 
   @Column({ type: 'int', nullable: true })
-  region_id: number | null;
+  region_id!: number | null;
 
   @Column({
     type: 'geometry',
@@ -39,20 +42,20 @@ export class Case {
     srid: 4326,
   })
   @Index({ spatial: true })
-  geom: Point;
+  geom!: Point;
 
   @CreateDateColumn({ type: 'timestamptz' })
-  created_at: Date;
+  created_at!: Date;
 
   @Column({ type: 'text', nullable: true })
-  patient_name: string | null;
+  patient_name!: string | null;
 
   @Column({ type: 'int', nullable: true })
-  patient_age: number | null;
+  patient_age!: number | null;
 
   @Column({ type: 'text', nullable: true })
-  patient_gender: string | null;
+  patient_gender!: string | null;
 
   @Column({ type: 'text', nullable: true })
-  notes: string | null;
+  notes!: string | null;
 }

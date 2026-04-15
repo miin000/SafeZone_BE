@@ -6,6 +6,7 @@ import {
   IsBoolean,
   IsUrl,
   MinLength,
+  IsUUID,
 } from 'class-validator';
 import {
   HealthInfoCategory,
@@ -33,6 +34,11 @@ export class CreateHealthInfoDto {
   @IsOptional()
   @IsEnum(HealthInfoDiseaseType)
   diseaseType?: HealthInfoDiseaseType;
+
+  // Optional: prefer catalog FK
+  @IsOptional()
+  @IsUUID()
+  diseaseId?: string;
 
   @IsOptional()
   @IsEnum(HealthInfoTarget)

@@ -4,6 +4,7 @@ import {
   IsEnum,
   IsNumberString,
   IsBoolean,
+  IsUUID,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { PostStatus } from '../entities/post.entity';
@@ -16,6 +17,10 @@ export class QueryPostDto {
   @IsOptional()
   @IsString()
   diseaseType?: string;
+
+  @IsOptional()
+  @IsUUID()
+  diseaseId?: string;
 
   @IsOptional()
   @IsString()

@@ -30,6 +30,7 @@ export class DiseaseService implements OnModuleInit {
         CREATE TABLE IF NOT EXISTS diseases (
           id UUID PRIMARY KEY,
           name VARCHAR(255) NOT NULL UNIQUE,
+          name_vi VARCHAR(255),
           description TEXT,
           risk_level VARCHAR(50) NOT NULL DEFAULT 'medium',
           aliases TEXT,
@@ -41,6 +42,11 @@ export class DiseaseService implements OnModuleInit {
         );
       `);
 
+      // Backward-compatible migration (existing DBs)
+      await this.dataSource.query(
+        `ALTER TABLE diseases ADD COLUMN IF NOT EXISTS name_vi VARCHAR(255);`,
+      );
+
       await this.dataSource.query(
         `CREATE INDEX IF NOT EXISTS idx_diseases_name ON diseases(name);`,
       );
@@ -49,16 +55,32 @@ export class DiseaseService implements OnModuleInit {
       );
 
       await this.dataSource.query(`
-        INSERT INTO diseases (id, name, description, risk_level, icd_code, is_active)
+        INSERT INTO diseases (id, name, name_vi, description, risk_level, icd_code, is_active)
         VALUES
-          ('9f66331f-b277-4b17-8661-f04b2676eb9e', 'COVID-19', 'Bệnh do virus SARS-CoV-2 gây ra', 'critical', 'U07.1', true),
-          ('fe95a2d0-a0fd-4f44-b982-e4dca8e41216', 'Dengue', 'Sốt xuất huyết do muỗi truyền', 'high', 'A90', true),
-          ('5fce8e53-9f57-4121-b2a6-cf6640f7cc5b', 'HFMD', 'Tay chân miệng ở trẻ em', 'medium', 'B08.4', true),
-          ('d8b5ed95-6988-488a-9d8c-8d01da5949f0', 'Influenza', 'Cúm mùa', 'medium', 'J10', true),
-          ('3205c1e0-ec0f-407d-95b4-0478b3f18666', 'Cholera', 'Bệnh tả', 'high', 'A00', true),
-          ('244d82d6-f896-49cc-b331-c2f9fd4fd2f4', 'Typhoid', 'Thương hàn', 'high', 'A01.0', true),
-          ('6f56b5ef-91c3-4463-b2bd-817371db7a13', 'Malaria', 'Sốt rét', 'high', 'B50', true)
+          ('9f66331f-b277-4b17-8661-f04b2676eb9e', 'COVID-19', 'COVID-19', 'Bệnh do virus SARS-CoV-2 gây ra', 'critical', 'U07.1', true),
+          ('fe95a2d0-a0fd-4f44-b982-e4dca8e41216', 'Dengue', 'Sốt xuất huyết', 'Sốt xuất huyết do muỗi truyền', 'high', 'A90', true),
+          ('5fce8e53-9f57-4121-b2a6-cf6640f7cc5b', 'HFMD', 'Tay chân miệng', 'Tay chân miệng ở trẻ em', 'medium', 'B08.4', true),
+          ('d8b5ed95-6988-488a-9d8c-8d01da5949f0', 'Influenza', 'Cúm mùa', 'Cúm mùa', 'medium', 'J10', true),
+          ('3205c1e0-ec0f-407d-95b4-0478b3f18666', 'Cholera', 'Bệnh tả', 'Bệnh tả', 'high', 'A00', true),
+          ('244d82d6-f896-49cc-b331-c2f9fd4fd2f4', 'Typhoid', 'Thương hàn', 'Thương hàn', 'high', 'A01.0', true),
+          ('6f56b5ef-91c3-4463-b2bd-817371db7a13', 'Malaria', 'Sốt rét', 'Sốt rét', 'high', 'B50', true)
         ON CONFLICT (name) DO NOTHING;
+      `);
+
+      // Ensure name_vi is populated for seeded diseases even on older DBs
+      await this.dataSource.query(`
+        UPDATE diseases
+        SET name_vi = CASE name
+          WHEN 'COVID-19' THEN 'COVID-19'
+          WHEN 'Dengue' THEN 'Sốt xuất huyết'
+          WHEN 'HFMD' THEN 'Tay chân miệng'
+          WHEN 'Influenza' THEN 'Cúm mùa'
+          WHEN 'Cholera' THEN 'Bệnh tả'
+          WHEN 'Typhoid' THEN 'Thương hàn'
+          WHEN 'Malaria' THEN 'Sốt rét'
+          ELSE name_vi
+        END
+        WHERE name_vi IS NULL;
       `);
     } catch (error: any) {
       this.logger.error(
@@ -68,16 +90,24 @@ export class DiseaseService implements OnModuleInit {
   }
 
   async create(createDiseaseDto: CreateDiseaseDto): Promise<Disease> {
+    const normalizedDto: CreateDiseaseDto & { nameVi?: string } = {
+      ...createDiseaseDto,
+      nameVi:
+        createDiseaseDto.nameVi ??
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (createDiseaseDto as any).name_vi,
+    };
+
     // Check if disease already exists
     const existing = await this.diseaseRepository.findOne({
-      where: { name: createDiseaseDto.name },
+      where: { name: normalizedDto.name },
     });
 
     if (existing) {
       throw new ConflictException('Disease already exists');
     }
 
-    const disease = this.diseaseRepository.create(createDiseaseDto);
+    const disease = this.diseaseRepository.create(normalizedDto);
     return this.diseaseRepository.save(disease);
   }
 
@@ -118,10 +148,18 @@ export class DiseaseService implements OnModuleInit {
   ): Promise<Disease> {
     const disease = await this.findOne(id);
 
+    const normalizedDto: UpdateDiseaseDto & { nameVi?: string } = {
+      ...updateDiseaseDto,
+      nameVi:
+        updateDiseaseDto.nameVi ??
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (updateDiseaseDto as any).name_vi,
+    };
+
     // Check if new name conflicts with existing disease
-    if (updateDiseaseDto.name && updateDiseaseDto.name !== disease.name) {
+    if (normalizedDto.name && normalizedDto.name !== disease.name) {
       const existing = await this.diseaseRepository.findOne({
-        where: { name: updateDiseaseDto.name },
+        where: { name: normalizedDto.name },
       });
 
       if (existing) {
@@ -129,7 +167,7 @@ export class DiseaseService implements OnModuleInit {
       }
     }
 
-    Object.assign(disease, updateDiseaseDto);
+    Object.assign(disease, normalizedDto);
     return this.diseaseRepository.save(disease);
   }
 

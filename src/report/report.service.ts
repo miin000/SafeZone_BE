@@ -6,9 +6,10 @@ import {
   Inject,
   forwardRef,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import {
   Report,
   ReportStatus,
@@ -24,7 +25,7 @@ import { ZoneService } from '../zone/zone.service';
 import { User } from '../auth/entities/user.entity';
 
 @Injectable()
-export class ReportService {
+export class ReportService implements OnModuleInit {
   private readonly logger = new Logger(ReportService.name);
 
   constructor(
@@ -36,7 +37,49 @@ export class ReportService {
     @Inject(forwardRef(() => GisService))
     private gisService: GisService,
     private zoneService: ZoneService,
+    private dataSource: DataSource,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    // Ensure FK-based disease reference on reports table (backward compatible with diseaseType text)
+    await this.dataSource.query(
+      `ALTER TABLE reports ADD COLUMN IF NOT EXISTS "diseaseId" uuid;`,
+    );
+    await this.dataSource.query(
+      `CREATE INDEX IF NOT EXISTS idx_reports_disease_id ON reports("diseaseId");`,
+    );
+
+    // Best-effort backfill from legacy diseaseType text (exact name match, case-insensitive)
+    await this.dataSource.query(
+      `
+      UPDATE reports r
+      SET "diseaseId" = d.id
+      FROM diseases d
+      WHERE r."diseaseId" IS NULL
+        AND r."diseaseType" IS NOT NULL
+        AND LOWER(TRIM(r."diseaseType")) = LOWER(TRIM(d.name))
+      `,
+    );
+
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF to_regclass('public.diseases') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'fk_reports_disease_id'
+          )
+        THEN
+          ALTER TABLE reports
+            ADD CONSTRAINT fk_reports_disease_id
+            FOREIGN KEY ("diseaseId")
+            REFERENCES diseases(id)
+            ON DELETE SET NULL;
+        END IF;
+      END$$;
+    `);
+  }
 
   // Log status change to audit trail
   private async logStatusChange(
@@ -89,6 +132,15 @@ export class ReportService {
 
     const reportType = createReportDto.reportType || 'case_report';
 
+    const resolvedDiseaseIdRows = createReportDto.diseaseId
+      ? null
+      : await this.dataSource.query(
+          `SELECT id FROM diseases WHERE name = $1 LIMIT 1`,
+          [createReportDto.diseaseType],
+        );
+    const resolvedDiseaseId: string | null =
+      (createReportDto.diseaseId ?? resolvedDiseaseIdRows?.[0]?.id) || null;
+
     const savedReport = await this.reportRepository.manager.transaction(
       async (manager) => {
         const txUserRepository = manager.getRepository(User);
@@ -122,9 +174,14 @@ export class ReportService {
         const duplicateReport = await txReportRepository
           .createQueryBuilder('report')
           .where('report.userId = :userId', { userId })
-          .andWhere('report.diseaseType = :diseaseType', {
-            diseaseType: createReportDto.diseaseType,
-          })
+          .andWhere(
+            resolvedDiseaseId
+              ? 'report.diseaseId = :diseaseId'
+              : 'report.diseaseType = :diseaseType',
+            resolvedDiseaseId
+              ? { diseaseId: resolvedDiseaseId }
+              : { diseaseType: createReportDto.diseaseType },
+          )
           .andWhere('report.reportType = :reportType', {
             reportType,
           })
@@ -183,6 +240,7 @@ export class ReportService {
         const reportData: Partial<Report> = {
           ...rest,
           userId,
+          diseaseId: resolvedDiseaseId,
           description: normalizedDescription,
           status: ReportStatus.SUBMITTED,
           reportType,
@@ -553,6 +611,7 @@ export class ReportService {
 
       createdCase = await this.gisService.createCase({
         disease_type: report.diseaseType,
+        disease_id: report.diseaseId ?? undefined,
         status: 'suspected',
         severity: severityMap[String(report.severityLevel || 'medium')] || 1,
         reported_time: (report.createdAt || new Date()).toISOString(),
@@ -655,6 +714,7 @@ export class ReportService {
       limit = 20,
       status,
       diseaseType,
+      diseaseId,
       startDate,
       endDate,
     } = queryDto;
@@ -668,7 +728,9 @@ export class ReportService {
       queryBuilder.andWhere('report.status = :status', { status });
     }
 
-    if (diseaseType) {
+    if (diseaseId) {
+      queryBuilder.andWhere('report.diseaseId = :diseaseId', { diseaseId });
+    } else if (diseaseType) {
       queryBuilder.andWhere('report.diseaseType = :diseaseType', {
         diseaseType,
       });
@@ -972,9 +1034,10 @@ export class ReportService {
 
     const byDiseaseRaw = await this.reportRepository
       .createQueryBuilder('report')
-      .select('report.diseaseType', 'diseaseType')
+      .leftJoin('diseases', 'd', 'd.id = report.diseaseId')
+      .select('COALESCE(d.name, report.diseaseType)', 'diseaseType')
       .addSelect('COUNT(*)', 'count')
-      .groupBy('report.diseaseType')
+      .groupBy('COALESCE(d.name, report.diseaseType)')
       .getRawMany();
 
     const byDisease = byDiseaseRaw.reduce(

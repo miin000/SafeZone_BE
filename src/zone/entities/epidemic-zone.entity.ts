@@ -39,6 +39,10 @@ export class EpidemicZone {
   @Column()
   diseaseType: string;
 
+  @Column({ type: 'uuid', nullable: true })
+  @Index()
+  diseaseId: string | null;
+
   @Column({
     type: 'geometry',
     spatialFeatureType: 'Point',

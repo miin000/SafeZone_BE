@@ -1,4 +1,4 @@
-import { IsOptional, IsEnum, IsString, IsNumber, Min } from 'class-validator';
+import { IsOptional, IsEnum, IsString, IsNumber, Min, IsUUID } from 'class-validator';
 import { Type } from 'class-transformer';
 import {
   HealthInfoCategory,
@@ -20,6 +20,10 @@ export class QueryHealthInfoDto {
   @IsOptional()
   @IsEnum(HealthInfoDiseaseType)
   diseaseType?: HealthInfoDiseaseType;
+
+  @IsOptional()
+  @IsUUID()
+  diseaseId?: string;
 
   @IsOptional()
   @IsEnum(HealthInfoTarget)

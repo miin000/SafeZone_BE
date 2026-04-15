@@ -47,6 +47,10 @@ export class Post {
   @Column({ nullable: true })
   diseaseType: string;
 
+  @Column({ type: 'uuid', nullable: true })
+  @Index()
+  diseaseId: string | null;
+
   @Column({ nullable: true })
   adminNote: string;
 

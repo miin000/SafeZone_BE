@@ -7,6 +7,15 @@ export class CreateDiseaseDto {
 
   @IsOptional()
   @IsString()
+  nameVi?: string;
+
+  // Backward/compat: allow snake_case from some clients
+  @IsOptional()
+  @IsString()
+  name_vi?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
 
   @IsOptional()
@@ -30,6 +39,15 @@ export class UpdateDiseaseDto {
   @IsOptional()
   @IsString()
   name?: string;
+
+  @IsOptional()
+  @IsString()
+  nameVi?: string;
+
+  // Backward/compat: allow snake_case from some clients
+  @IsOptional()
+  @IsString()
+  name_vi?: string;
 
   @IsOptional()
   @IsString()

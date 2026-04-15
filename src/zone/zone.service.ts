@@ -96,6 +96,45 @@ export class ZoneService implements OnModuleInit {
       ADD COLUMN IF NOT EXISTS "reviewNote" text
     `);
 
+    // Optional FK to diseases catalog
+    await this.dataSource.query(
+      `ALTER TABLE epidemic_zones ADD COLUMN IF NOT EXISTS "diseaseId" uuid;`,
+    );
+    await this.dataSource.query(
+      `CREATE INDEX IF NOT EXISTS idx_epidemic_zones_disease_id ON epidemic_zones("diseaseId");`,
+    );
+
+    // Best-effort backfill from legacy diseaseType text (exact name match, case-insensitive)
+    await this.dataSource.query(
+      `
+      UPDATE epidemic_zones z
+      SET "diseaseId" = d.id
+      FROM diseases d
+      WHERE z."diseaseId" IS NULL
+        AND z."diseaseType" IS NOT NULL
+        AND LOWER(TRIM(z."diseaseType")) = LOWER(TRIM(d.name))
+      `,
+    );
+
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF to_regclass('public.diseases') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'fk_epidemic_zones_disease_id'
+          )
+        THEN
+          ALTER TABLE epidemic_zones
+            ADD CONSTRAINT fk_epidemic_zones_disease_id
+            FOREIGN KEY ("diseaseId")
+            REFERENCES diseases(id)
+            ON DELETE SET NULL;
+        END IF;
+      END$$;
+    `);
+
     await this.dataSource.query(`
       UPDATE epidemic_zones
       SET "lifecycleStatus" = 'approved'
@@ -181,11 +220,12 @@ export class ZoneService implements OnModuleInit {
 
     const where: string[] = [
       'c.geom IS NOT NULL',
-      'c.disease_type = $1',
+      // Prefer FK match when zone has diseaseId; fallback to legacy text
+      '(($1::uuid IS NOT NULL AND c.disease_id = $1::uuid) OR ($1::uuid IS NULL AND c.disease_type = $5))',
       'c.is_archived IS NOT TRUE',
       'ST_DWithin(c.geom::geography, ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography, $4)',
     ];
-    const values: any[] = [zone.diseaseType, lon, lat, radiusKm * 1000];
+    const values: any[] = [zone.diseaseId || null, lon, lat, radiusKm * 1000, zone.diseaseType];
 
     if (options?.from) {
       values.push(options.from);
@@ -222,7 +262,11 @@ export class ZoneService implements OnModuleInit {
         FROM epidemic_zones z2
         LEFT JOIN cases c
           ON c.geom IS NOT NULL
-          AND c.disease_type = z2."diseaseType"
+          AND (
+            (z2."diseaseId" IS NOT NULL AND c.disease_id = z2."diseaseId")
+            OR (z2."diseaseId" IS NULL AND c.disease_type = z2."diseaseType")
+            OR (z2."diseaseId" IS NOT NULL AND c.disease_id IS NULL AND c.disease_type = z2."diseaseType")
+          )
           AND c.is_archived IS NOT TRUE
           AND c.status IN ('suspected', 'probable', 'confirmed', 'under treatment', 'under observation')
           AND ST_DWithin(
@@ -245,8 +289,18 @@ export class ZoneService implements OnModuleInit {
   ): Promise<EpidemicZone> {
     const { lat, lon, ...rest } = createZoneDto;
 
+    const resolvedDiseaseIdRows = createZoneDto.diseaseId
+      ? null
+      : await this.dataSource.query(
+          `SELECT id FROM diseases WHERE name = $1 LIMIT 1`,
+          [createZoneDto.diseaseType],
+        );
+    const resolvedDiseaseId: string | null =
+      (createZoneDto.diseaseId ?? resolvedDiseaseIdRows?.[0]?.id) || null;
+
     const zone = this.zoneRepository.create({
       ...rest,
+      diseaseId: resolvedDiseaseId,
       source: createZoneDto.source || ZoneSource.MANUAL,
       lifecycleStatus:
         createZoneDto.lifecycleStatus || ZoneLifecycleStatus.APPROVED,
@@ -393,6 +447,16 @@ export class ZoneService implements OnModuleInit {
     updateZoneDto: UpdateZoneDto,
   ): Promise<EpidemicZone> {
     const zone = await this.findOne(id);
+
+    if (updateZoneDto.diseaseId !== undefined) {
+      zone.diseaseId = updateZoneDto.diseaseId || null;
+    } else if (updateZoneDto.diseaseType !== undefined) {
+      const rows = await this.dataSource.query(
+        `SELECT id FROM diseases WHERE name = $1 LIMIT 1`,
+        [updateZoneDto.diseaseType],
+      );
+      zone.diseaseId = (rows?.[0]?.id as string | undefined) ?? null;
+    }
 
     if (updateZoneDto.lat !== undefined && updateZoneDto.lon !== undefined) {
       zone.center = {

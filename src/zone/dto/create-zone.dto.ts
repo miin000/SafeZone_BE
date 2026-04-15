@@ -7,6 +7,7 @@ import {
   Min,
   Max,
   IsDateString,
+  IsUUID,
 } from 'class-validator';
 import {
   RiskLevel,
@@ -20,6 +21,10 @@ export class CreateZoneDto {
 
   @IsString()
   diseaseType: string;
+
+  @IsOptional()
+  @IsUUID()
+  diseaseId?: string;
 
   @IsNumber()
   @Min(-90)

@@ -64,6 +64,11 @@ export class HealthInfo {
   @Index()
   diseaseType: HealthInfoDiseaseType;
 
+  // Optional FK to diseases catalog (preferred for new clients)
+  @Column({ type: 'uuid', nullable: true })
+  @Index()
+  diseaseId: string | null;
+
   @Column({ default: HealthInfoTarget.GENERAL })
   @Index()
   target: HealthInfoTarget;

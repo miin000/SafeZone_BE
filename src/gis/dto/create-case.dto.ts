@@ -15,6 +15,16 @@ export class CreateCaseDto {
   @IsString()
   disease_type: string;
 
+  // Optional: prefer catalog FK when available (backward compatible)
+  @IsOptional()
+  @IsUUID()
+  disease_id?: string;
+
+  // Compatibility for camelCase clients
+  @IsOptional()
+  @IsUUID()
+  diseaseId?: string;
+
   @IsNotEmpty()
   @IsIn([
     'suspected',

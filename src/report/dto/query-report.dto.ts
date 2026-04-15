@@ -4,6 +4,7 @@ import {
   IsDateString,
   IsNumber,
   Min,
+  IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ReportStatus } from '../entities/report.entity';
@@ -27,6 +28,10 @@ export class QueryReportDto {
 
   @IsOptional()
   diseaseType?: string;
+
+  @IsOptional()
+  @IsUUID()
+  diseaseId?: string;
 
   @IsOptional()
   @IsDateString()

@@ -31,6 +31,51 @@ export class HealthInfoService implements OnModuleInit {
       ADD COLUMN IF NOT EXISTS "target" VARCHAR(50) NOT NULL DEFAULT 'general',
       ADD COLUMN IF NOT EXISTS "severityLevel" VARCHAR(50) NOT NULL DEFAULT 'low'
     `);
+
+    // Optional FK to diseases catalog
+    await this.dataSource.query(
+      `ALTER TABLE health_info ADD COLUMN IF NOT EXISTS "diseaseId" uuid;`,
+    );
+    await this.dataSource.query(
+      `CREATE INDEX IF NOT EXISTS idx_health_info_disease_id ON health_info("diseaseId");`,
+    );
+
+    // Best-effort backfill from enum-like diseaseType values
+    await this.dataSource.query(
+      `
+      UPDATE health_info h
+      SET "diseaseId" = d.id
+      FROM diseases d
+      WHERE h."diseaseId" IS NULL
+        AND h."diseaseType" IS NOT NULL
+        AND d.name = CASE LOWER(TRIM(h."diseaseType"))
+          WHEN 'dengue' THEN 'Dengue'
+          WHEN 'covid' THEN 'COVID-19'
+          WHEN 'flu' THEN 'Influenza'
+          WHEN 'hfmd' THEN 'HFMD'
+          ELSE NULL
+        END
+      `,
+    );
+
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF to_regclass('public.diseases') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'fk_health_info_disease_id'
+          )
+        THEN
+          ALTER TABLE health_info
+            ADD CONSTRAINT fk_health_info_disease_id
+            FOREIGN KEY ("diseaseId")
+            REFERENCES diseases(id)
+            ON DELETE SET NULL;
+        END IF;
+      END$$;
+    `);
   }
 
   async create(
@@ -50,6 +95,7 @@ export class HealthInfoService implements OnModuleInit {
       category,
       status,
       diseaseType,
+      diseaseId,
       target,
       severityLevel,
       search,
@@ -74,7 +120,9 @@ export class HealthInfoService implements OnModuleInit {
       queryBuilder.andWhere('healthInfo.status = :status', { status });
     }
 
-    if (diseaseType) {
+    if (diseaseId) {
+      queryBuilder.andWhere('healthInfo.diseaseId = :diseaseId', { diseaseId });
+    } else if (diseaseType) {
       queryBuilder.andWhere('healthInfo.diseaseType = :diseaseType', {
         diseaseType,
       });
@@ -153,7 +201,11 @@ export class HealthInfoService implements OnModuleInit {
         category: rest.category,
       });
     }
-    if (rest.diseaseType) {
+    if (rest.diseaseId) {
+      queryBuilder.andWhere('healthInfo.diseaseId = :diseaseId', {
+        diseaseId: rest.diseaseId,
+      });
+    } else if (rest.diseaseType) {
       queryBuilder.andWhere('healthInfo.diseaseType = :diseaseType', {
         diseaseType: rest.diseaseType,
       });

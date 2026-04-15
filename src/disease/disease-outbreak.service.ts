@@ -76,6 +76,11 @@ export class DiseaseOutbreakService implements OnModuleInit {
       await this.dataSource.query(
         `ALTER TABLE cases ADD COLUMN IF NOT EXISTS outbreak_id uuid;`,
       );
+
+      // cases.disease_id: FK to diseases.id (optional for backward compatibility)
+      await this.dataSource.query(
+        `ALTER TABLE cases ADD COLUMN IF NOT EXISTS disease_id uuid;`,
+      );
       await this.dataSource.query(
         `ALTER TABLE cases ADD COLUMN IF NOT EXISTS is_archived boolean NOT NULL DEFAULT false;`,
       );
@@ -87,8 +92,44 @@ export class DiseaseOutbreakService implements OnModuleInit {
         `CREATE INDEX IF NOT EXISTS idx_cases_outbreak_id ON cases(outbreak_id);`,
       );
       await this.dataSource.query(
+        `CREATE INDEX IF NOT EXISTS idx_cases_disease_id ON cases(disease_id);`,
+      );
+      await this.dataSource.query(
         `CREATE INDEX IF NOT EXISTS idx_cases_is_archived ON cases(is_archived);`,
       );
+
+      // Best-effort backfill: map legacy cases.disease_type (text) -> cases.disease_id
+      // Only fills when disease_type matches a catalog disease by exact name.
+      await this.dataSource.query(
+        `
+        UPDATE cases c
+        SET disease_id = d.id
+        FROM diseases d
+        WHERE c.disease_id IS NULL
+          AND c.disease_type IS NOT NULL
+          AND c.disease_type = d.name
+        `,
+      );
+
+      // FK: only create if diseases table exists
+      await this.dataSource.query(`
+        DO $$
+        BEGIN
+          IF to_regclass('public.diseases') IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM pg_constraint
+              WHERE conname = 'fk_cases_disease_id'
+            )
+          THEN
+            ALTER TABLE cases
+              ADD CONSTRAINT fk_cases_disease_id
+              FOREIGN KEY (disease_id)
+              REFERENCES diseases(id)
+              ON DELETE SET NULL;
+          END IF;
+        END$$;
+      `);
 
       // FK: best-effort (avoid failing startup if already exists)
       await this.dataSource.query(`
@@ -141,12 +182,16 @@ export class DiseaseOutbreakService implements OnModuleInit {
       SET outbreak_id = COALESCE(c.outbreak_id, $1)
       WHERE c.outbreak_id IS NULL
         AND c.reported_time IS NOT NULL
-        AND c.disease_type = $2
-        AND c.reported_time >= $3::timestamptz
-        AND c.reported_time <= $4::timestamptz
+        AND (
+          c.disease_id = $2
+          OR (c.disease_id IS NULL AND c.disease_type = $3)
+        )
+        AND c.reported_time >= $4::timestamptz
+        AND c.reported_time <= $5::timestamptz
       `,
       [
         outbreak.id,
+        outbreak.diseaseId,
         diseaseName,
         outbreak.startDate.toISOString(),
         outbreak.endDate.toISOString(),
@@ -160,12 +205,16 @@ export class DiseaseOutbreakService implements OnModuleInit {
           archived_at = now(),
           outbreak_id = COALESCE(c.outbreak_id, $1)
       WHERE c.reported_time IS NOT NULL
-        AND c.disease_type = $2
-        AND c.reported_time >= $3::timestamptz
-        AND c.reported_time <= $4::timestamptz
+        AND (
+          c.disease_id = $2
+          OR (c.disease_id IS NULL AND c.disease_type = $3)
+        )
+        AND c.reported_time >= $4::timestamptz
+        AND c.reported_time <= $5::timestamptz
       `,
       [
         outbreak.id,
+        outbreak.diseaseId,
         diseaseName,
         outbreak.startDate.toISOString(),
         outbreak.endDate.toISOString(),

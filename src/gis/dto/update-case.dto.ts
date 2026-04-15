@@ -15,6 +15,15 @@ export class UpdateCaseDto {
   disease_type?: string;
 
   @IsOptional()
+  @IsUUID()
+  disease_id?: string;
+
+  // Compatibility for camelCase clients
+  @IsOptional()
+  @IsUUID()
+  diseaseId?: string;
+
+  @IsOptional()
   @IsIn([
     'suspected',
     'probable',

@@ -9,6 +9,7 @@ import {
   IsEnum,
   IsDateString,
   ValidateNested,
+  IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -85,6 +86,11 @@ export class CreateReportDto {
 
   @IsString()
   diseaseType: string;
+
+  // Optional: prefer catalog FK
+  @IsOptional()
+  @IsUUID()
+  diseaseId?: string;
 
   @IsString()
   description: string;

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsArray, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsArray, MaxLength, IsUUID } from 'class-validator';
 
 export class CreatePostDto {
   @IsString()
@@ -17,4 +17,8 @@ export class CreatePostDto {
   @IsOptional()
   @IsString()
   diseaseType?: string;
+
+  @IsOptional()
+  @IsUUID()
+  diseaseId?: string;
 }

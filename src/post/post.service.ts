@@ -3,9 +3,10 @@ import {
   NotFoundException,
   ForbiddenException,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Post, PostStatus } from './entities/post.entity';
 import { PostReaction, ReactionType } from './entities/post-reaction.entity';
 import { CreatePostDto } from './dto/create-post.dto';
@@ -15,7 +16,7 @@ import { NotificationService } from '../notification/notification.service';
 import { NotificationType } from '../notification/entities/notification.entity';
 
 @Injectable()
-export class PostService {
+export class PostService implements OnModuleInit {
   private readonly logger = new Logger(PostService.name);
 
   constructor(
@@ -24,15 +25,67 @@ export class PostService {
     @InjectRepository(PostReaction)
     private reactionRepository: Repository<PostReaction>,
     private notificationService: NotificationService,
+    private dataSource: DataSource,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    // Ensure FK-based disease reference on posts table (backward compatible with diseaseType text)
+    await this.dataSource.query(
+      `ALTER TABLE posts ADD COLUMN IF NOT EXISTS "diseaseId" uuid;`,
+    );
+    await this.dataSource.query(
+      `CREATE INDEX IF NOT EXISTS idx_posts_disease_id ON posts("diseaseId");`,
+    );
+
+    // Best-effort backfill from legacy diseaseType text (exact name match, case-insensitive)
+    await this.dataSource.query(
+      `
+      UPDATE posts p
+      SET "diseaseId" = d.id
+      FROM diseases d
+      WHERE p."diseaseId" IS NULL
+        AND p."diseaseType" IS NOT NULL
+        AND LOWER(TRIM(p."diseaseType")) = LOWER(TRIM(d.name))
+      `,
+    );
+
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF to_regclass('public.diseases') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'fk_posts_disease_id'
+          )
+        THEN
+          ALTER TABLE posts
+            ADD CONSTRAINT fk_posts_disease_id
+            FOREIGN KEY ("diseaseId")
+            REFERENCES diseases(id)
+            ON DELETE SET NULL;
+        END IF;
+      END$$;
+    `);
+  }
 
   async create(userId: string, createPostDto: CreatePostDto): Promise<Post> {
     this.logger.log(
       `Create post request userId=${userId} contentLength=${createPostDto.content?.length ?? 0} imageCount=${createPostDto.imageUrls?.length ?? 0} diseaseType=${createPostDto.diseaseType ?? 'n/a'}`,
     );
 
+    let resolvedDiseaseType = createPostDto.diseaseType;
+    if (createPostDto.diseaseId && !resolvedDiseaseType) {
+      const rows = await this.dataSource.query(
+        `SELECT name FROM diseases WHERE id = $1 LIMIT 1`,
+        [createPostDto.diseaseId],
+      );
+      resolvedDiseaseType = rows?.[0]?.name ?? undefined;
+    }
+
     const post = this.postRepository.create({
       ...createPostDto,
+      diseaseType: resolvedDiseaseType,
       userId,
       status: PostStatus.PENDING,
     });
@@ -77,7 +130,11 @@ export class PostService {
       }
     }
 
-    if (queryDto.diseaseType) {
+    if (queryDto.diseaseId) {
+      queryBuilder.andWhere('post.diseaseId = :diseaseId', {
+        diseaseId: queryDto.diseaseId,
+      });
+    } else if (queryDto.diseaseType) {
       queryBuilder.andWhere('post.diseaseType = :diseaseType', {
         diseaseType: queryDto.diseaseType,
       });
@@ -157,6 +214,14 @@ export class PostService {
     // If user edits, reset to pending for re-approval
     if (!isAdmin && post.status === PostStatus.APPROVED) {
       post.status = PostStatus.PENDING;
+    }
+
+    if (updatePostDto.diseaseId && !updatePostDto.diseaseType) {
+      const rows = await this.dataSource.query(
+        `SELECT name FROM diseases WHERE id = $1 LIMIT 1`,
+        [updatePostDto.diseaseId],
+      );
+      updatePostDto.diseaseType = rows?.[0]?.name ?? updatePostDto.diseaseType;
     }
 
     Object.assign(post, updatePostDto);
