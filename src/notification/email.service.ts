@@ -31,9 +31,7 @@ export class EmailService implements OnModuleInit {
     this.senderName =
       this.configService.get<string>('RESEND_SENDER_NAME') || 'SafeZone';
 
-    this.logger.log(
-      `Resend API Key: ${this.apiKey ? this.apiKey.substring(0, 10) + '...' : 'NOT SET'}`,
-    );
+    this.logger.log(`Resend configured: ${this.apiKey ? 'YES' : 'NO'}`);
     this.logger.log(`Resend Sender Email: ${this.senderEmail}`);
     this.logger.log(`Resend Sender Name: ${this.senderName}`);
 

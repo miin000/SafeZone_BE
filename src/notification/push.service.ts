@@ -22,6 +22,57 @@ export class PushService implements OnModuleInit {
     await this.initializeFirebase();
   }
 
+  private normalizePrivateKey(privateKey: string): string {
+    // Render/env providers sometimes wrap values in quotes and/or escape newlines.
+    return privateKey
+      .trim()
+      .replace(/^"(.*)"$/, '$1')
+      .replace(/^'(.*)'$/, '$1')
+      .replace(/\\n/g, '\n')
+      .replace(/\r\n/g, '\n');
+  }
+
+  private tryInitializeFromEnv(): boolean {
+    const projectId = this.configService.get<string>('FIREBASE_PROJECT_ID');
+    const clientEmail = this.configService.get<string>('FIREBASE_CLIENT_EMAIL');
+    const privateKeyRaw = this.configService.get<string>('FIREBASE_PRIVATE_KEY');
+
+    if (!projectId || !clientEmail || !privateKeyRaw) return false;
+
+    admin.initializeApp({
+      credential: admin.credential.cert({
+        projectId,
+        clientEmail,
+        privateKey: this.normalizePrivateKey(privateKeyRaw),
+      }),
+    });
+
+    this.isInitialized = true;
+    this.logger.log(`✅ Firebase Admin initialized from env: ${projectId}`);
+    return true;
+  }
+
+  private tryInitializeFromFile(serviceAccountPath: string): boolean {
+    const serviceAccountContent = fs.readFileSync(serviceAccountPath, 'utf8');
+    const serviceAccount = JSON.parse(serviceAccountContent);
+
+    if (serviceAccount.private_key) {
+      serviceAccount.private_key = this.normalizePrivateKey(
+        serviceAccount.private_key,
+      );
+    }
+
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
+
+    this.isInitialized = true;
+    this.logger.log(
+      `✅ Firebase Admin initialized with project: ${serviceAccount.project_id}`,
+    );
+    return true;
+  }
+
   private async initializeFirebase() {
     try {
       // Check if already initialized
@@ -31,64 +82,48 @@ export class PushService implements OnModuleInit {
         return;
       }
 
+      const nodeEnv = this.configService.get<string>('NODE_ENV');
+      const isProd = nodeEnv === 'production';
+      const preferFile =
+        this.configService.get<string>('FIREBASE_USE_FILE') === 'true';
+
       // Try to load service account from file
       const serviceAccountPath = path.join(
         process.cwd(),
         'firebase-service-account.json',
       );
 
-      if (fs.existsSync(serviceAccountPath)) {
-        const serviceAccountContent = fs.readFileSync(
-          serviceAccountPath,
-          'utf8',
-        );
-        const serviceAccount = JSON.parse(serviceAccountContent);
-
-        // Ensure private key is properly formatted
-        if (serviceAccount.private_key) {
-          serviceAccount.private_key = serviceAccount.private_key.replace(
-            /\\n/g,
-            '\n',
-          );
-        }
-
-        admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount),
-        });
-
-        this.isInitialized = true;
-        this.logger.log(
-          `✅ Firebase Admin initialized with project: ${serviceAccount.project_id}`,
-        );
-      } else {
-        // Try to load from environment variables
-        const projectId = this.configService.get<string>('FIREBASE_PROJECT_ID');
-        const clientEmail = this.configService.get<string>(
-          'FIREBASE_CLIENT_EMAIL',
-        );
-        const privateKey = this.configService.get<string>(
-          'FIREBASE_PRIVATE_KEY',
-        );
-
-        if (projectId && clientEmail && privateKey) {
-          admin.initializeApp({
-            credential: admin.credential.cert({
-              projectId,
-              clientEmail,
-              privateKey: privateKey.replace(/\\n/g, '\n'),
-            }),
-          });
-
-          this.isInitialized = true;
-          this.logger.log(
-            `✅ Firebase Admin initialized from env: ${projectId}`,
-          );
-        } else {
-          this.logger.warn(
-            '⚠️ Firebase not configured. Push notifications disabled.',
+      // On production (Render), prefer env vars to avoid relying on files.
+      if (isProd && !preferFile) {
+        try {
+          if (this.tryInitializeFromEnv()) return;
+        } catch (error) {
+          this.logger.error(
+            `❌ Firebase env initialization failed: ${error.message}`,
           );
         }
       }
+
+      if (fs.existsSync(serviceAccountPath)) {
+        try {
+          if (this.tryInitializeFromFile(serviceAccountPath)) return;
+        } catch (error) {
+          this.logger.error(
+            `❌ Firebase file initialization failed: ${error.message}`,
+          );
+        }
+      }
+
+      // Fallback to env (useful for non-prod or when file is invalid)
+      try {
+        if (this.tryInitializeFromEnv()) return;
+      } catch (error) {
+        this.logger.error(
+          `❌ Firebase env initialization failed: ${error.message}`,
+        );
+      }
+
+      this.logger.warn('⚠️ Firebase not configured. Push notifications disabled.');
     } catch (error) {
       this.logger.error(`❌ Failed to initialize Firebase: ${error.message}`);
     }

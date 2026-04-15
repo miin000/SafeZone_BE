@@ -18,20 +18,23 @@ export class SmsService implements OnModuleInit {
     this.verifyServiceSid =
       this.configService.get<string>('TWILIO_VERIFY_SERVICE_SID') || '';
 
+    const nodeEnv = this.configService.get<string>('NODE_ENV');
+
     // Check if dev mode is enabled (for testing without verified numbers)
     this.devMode = this.configService.get<string>('SMS_DEV_MODE') === 'true';
 
     this.logger.log(
-      `Twilio Account SID: ${accountSid ? accountSid.substring(0, 10) + '...' : 'NOT SET'}`,
-    );
-    this.logger.log(
-      `Twilio Verify Service SID: ${this.verifyServiceSid ? this.verifyServiceSid.substring(0, 10) + '...' : 'NOT SET'}`,
+      `Twilio configured: ${accountSid && authToken && this.verifyServiceSid ? 'YES' : 'NO'}`,
     );
 
     if (this.devMode) {
       this.logger.warn(
         '⚠️ SMS DEV MODE ENABLED - OTP will be logged to console, use code "123456" to verify',
       );
+
+      if (nodeEnv === 'production') {
+        this.logger.warn('⚠️ SMS_DEV_MODE is enabled in production');
+      }
     }
 
     if (accountSid && authToken && this.verifyServiceSid) {
