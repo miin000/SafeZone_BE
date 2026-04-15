@@ -39,6 +39,16 @@ export class PushService implements OnModuleInit {
 
     if (!projectId || !clientEmail || !privateKeyRaw) return false;
 
+    // Common Render misconfiguration: private_key_id (hex) pasted into FIREBASE_PRIVATE_KEY
+    // instead of the full PEM private_key.
+    const looksLikePem = privateKeyRaw.includes('BEGIN PRIVATE KEY');
+    const looksLikeKeyId = /^[a-f0-9]{32,}$/i.test(privateKeyRaw.trim());
+    if (!looksLikePem && looksLikeKeyId) {
+      this.logger.warn(
+        '⚠️ FIREBASE_PRIVATE_KEY looks like a private_key_id (hex). Set it to the full service account private_key PEM instead.',
+      );
+    }
+
     admin.initializeApp({
       credential: admin.credential.cert({
         projectId,
