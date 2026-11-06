@@ -1,5 +1,17 @@
-import { IsString, IsOptional, IsEnum, IsBoolean } from 'class-validator';
-import { DiseaseRiskLevel } from '../entities/disease.entity';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsBoolean,
+  IsArray,
+  IsNumber,
+  Min,
+  Max,
+} from 'class-validator';
+import {
+  CirculationLevel,
+  TransmissionRoute,
+} from '../disease-scoring';
 
 export class CreateDiseaseDto {
   @IsString()
@@ -19,10 +31,6 @@ export class CreateDiseaseDto {
   description?: string;
 
   @IsOptional()
-  @IsEnum(DiseaseRiskLevel)
-  riskLevel?: DiseaseRiskLevel;
-
-  @IsOptional()
   @IsString()
   aliases?: string;
 
@@ -33,6 +41,35 @@ export class CreateDiseaseDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  caseFatalityRate: number;
+
+  @IsArray()
+  @IsEnum(TransmissionRoute, { each: true })
+  transmissionRoutes: TransmissionRoute[];
+
+  @IsNumber()
+  @Min(0)
+  r0: number;
+
+  @IsBoolean()
+  hasVaccine: boolean;
+
+  @IsBoolean()
+  hasSpecificTreatment: boolean;
+
+  @IsEnum(CirculationLevel)
+  circulationLevel: CirculationLevel;
+
+  @IsBoolean()
+  isNovelSpecialDangerous: boolean;
+
+  @IsOptional()
+  @IsString()
+  scoringNotes?: string;
 }
 
 export class UpdateDiseaseDto {
@@ -54,10 +91,6 @@ export class UpdateDiseaseDto {
   description?: string;
 
   @IsOptional()
-  @IsEnum(DiseaseRiskLevel)
-  riskLevel?: DiseaseRiskLevel;
-
-  @IsOptional()
   @IsString()
   aliases?: string;
 
@@ -68,4 +101,40 @@ export class UpdateDiseaseDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  caseFatalityRate?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsEnum(TransmissionRoute, { each: true })
+  transmissionRoutes?: TransmissionRoute[];
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  r0?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  hasVaccine?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  hasSpecificTreatment?: boolean;
+
+  @IsOptional()
+  @IsEnum(CirculationLevel)
+  circulationLevel?: CirculationLevel;
+
+  @IsOptional()
+  @IsBoolean()
+  isNovelSpecialDangerous?: boolean;
+
+  @IsOptional()
+  @IsString()
+  scoringNotes?: string;
 }

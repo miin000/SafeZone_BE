@@ -10,7 +10,6 @@ import {
   IsUUID,
 } from 'class-validator';
 import {
-  RiskLevel,
   ZoneLifecycleStatus,
   ZoneSource,
 } from '../entities/epidemic-zone.entity';
@@ -39,15 +38,6 @@ export class CreateZoneDto {
   @IsNumber()
   @Min(0.1)
   radiusKm: number;
-
-  @IsOptional()
-  @IsEnum(RiskLevel)
-  riskLevel?: RiskLevel;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  caseCount?: number;
 
   @IsOptional()
   @IsString()

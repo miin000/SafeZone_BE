@@ -9,7 +9,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { Brackets, DataSource, Repository } from 'typeorm';
 import {
   Report,
   ReportStatus,
@@ -750,13 +750,68 @@ export class ReportService implements OnModuleInit {
       .take(limit)
       .getMany();
 
+    // Compute per-user per-disease submission ordinal for the list view.
+    // The Admin UI uses this to show "Lần gửi" as #1/#2/#3...
+    const submissionOrdinalById = await this.computeSubmissionOrdinals(data);
+
     data.forEach((report) => {
       if (report.user) {
         delete report.user.password;
       }
+
+      (report as any).userSubmissionCount = submissionOrdinalById.get(report.id) ?? 1;
     });
 
     return { data, total, page, limit };
+  }
+
+  private async computeSubmissionOrdinals(
+    pageReports: Report[],
+  ): Promise<Map<string, number>> {
+    const ordinals = new Map<string, number>();
+    if (pageReports.length === 0) return ordinals;
+
+    const pairs = new Map<string, { userId: string; diseaseType: string }>();
+    for (const r of pageReports) {
+      const userId = r.userId;
+      const diseaseType = (r.diseaseType || '').trim();
+      if (!userId || !diseaseType) continue;
+      pairs.set(`${userId}::${diseaseType}`, { userId, diseaseType });
+    }
+
+    if (pairs.size === 0) return ordinals;
+
+    const pairList = Array.from(pairs.values());
+    const qb = this.reportRepository
+      .createQueryBuilder('report')
+      .select(['report.id', 'report.userId', 'report.diseaseType', 'report.createdAt'])
+      .where(
+        new Brackets((b) => {
+          pairList.forEach((p, idx) => {
+            b.orWhere(
+              `(report.userId = :uid${idx} AND report.diseaseType = :dt${idx})`,
+              {
+                [`uid${idx}`]: p.userId,
+                [`dt${idx}`]: p.diseaseType,
+              },
+            );
+          });
+        }),
+      )
+      .orderBy('report.createdAt', 'ASC')
+      .addOrderBy('report.id', 'ASC');
+
+    const rows = await qb.getMany();
+
+    const counters = new Map<string, number>();
+    for (const row of rows) {
+      const key = `${row.userId}::${(row.diseaseType || '').trim()}`;
+      const next = (counters.get(key) ?? 0) + 1;
+      counters.set(key, next);
+      ordinals.set(row.id, next);
+    }
+
+    return ordinals;
   }
 
   async findByUser(userId: string): Promise<Report[]> {

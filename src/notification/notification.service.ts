@@ -33,6 +33,16 @@ export class NotificationService {
     type: NotificationType,
     data?: Record<string, any>,
   ): Promise<Notification> {
+    return this.createTopicBroadcast('all', title, body, type, data);
+  }
+
+  async createTopicBroadcast(
+    topic: string,
+    title: string,
+    body: string,
+    type: NotificationType,
+    data?: Record<string, any>,
+  ): Promise<Notification> {
     const notification = this.notificationRepository.create({
       title,
       body,
@@ -41,8 +51,7 @@ export class NotificationService {
       isBroadcast: true,
     });
 
-    // Send push notification to all users via topic
-    await this.pushService.sendToTopic('all', {
+    await this.pushService.sendToTopic(topic, {
       title,
       body,
       data: data
@@ -89,11 +98,17 @@ export class NotificationService {
   }
 
   async findByUser(userId: string): Promise<Notification[]> {
-    return this.notificationRepository.find({
-      where: [{ userId }, { isBroadcast: true }],
-      order: { createdAt: 'DESC' },
-      take: 100,
-    });
+    // Zone-targeted broadcasts are delivered via zone topics; they should not
+    // appear in everyone's in-app notification list.
+    return this.notificationRepository
+      .createQueryBuilder('n')
+      .where('n.userId = :userId', { userId })
+      .orWhere(
+        `(n.isBroadcast = true AND (n.data->>'audience' IS NULL OR n.data->>'audience' <> 'zone'))`,
+      )
+      .orderBy('n.createdAt', 'DESC')
+      .take(100)
+      .getMany();
   }
 
   async findOne(id: string): Promise<Notification> {
@@ -126,12 +141,18 @@ export class NotificationService {
   }
 
   async getUnreadCount(userId: string): Promise<number> {
-    return this.notificationRepository.count({
-      where: [
-        { userId, isRead: false },
-        { isBroadcast: true, isRead: false },
-      ],
+    const userUnread = await this.notificationRepository.count({
+      where: { userId, isRead: false },
     });
+
+    const broadcastUnread = await this.notificationRepository
+      .createQueryBuilder('n')
+      .where('n.isBroadcast = true')
+      .andWhere('n.isRead = false')
+      .andWhere(`(n.data->>'audience' IS NULL OR n.data->>'audience' <> 'zone')`)
+      .getCount();
+
+    return userUnread + broadcastUnread;
   }
 
   async delete(id: string, userId: string): Promise<void> {

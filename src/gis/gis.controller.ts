@@ -264,35 +264,6 @@ export class GisController {
     });
   }
 
-  @Get('clusters')
-  getClusteredCases(
-    @Query('diseaseType') diseaseType?: string,
-    @Query('status') status?: string,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-    @Query('clusterDistance') clusterDistance?: string,
-    @Query('clusterDistanceKm') clusterDistanceKm?: string,
-    @Query('minPoints') minPoints?: string,
-    @Query('includeNoise') includeNoise?: string,
-    @Query('outbreakId') outbreakId?: string,
-    @Query('includeArchived') includeArchived?: string,
-  ) {
-    return this.gisService.getClusteredCases({
-      diseaseType,
-      status,
-      from,
-      to,
-      clusterDistance: clusterDistance ? parseFloat(clusterDistance) : 0.05,
-      clusterDistanceKm: clusterDistanceKm
-        ? parseFloat(clusterDistanceKm)
-        : undefined,
-      minPoints: minPoints ? parseInt(minPoints, 10) : 4,
-      includeNoise: includeNoise === '1' || includeNoise === 'true',
-      outbreakId,
-      includeArchived: includeArchived === '1' || includeArchived === 'true',
-    });
-  }
-
   @Get('reverse-geocode')
   reverseGeocode(@Query('lat') lat: string, @Query('lon') lon: string) {
     return this.gisService.reverseGeocode(parseFloat(lat), parseFloat(lon));

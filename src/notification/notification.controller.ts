@@ -86,11 +86,13 @@ export class NotificationController {
       const zone = await this.zoneService.findOne(body.zoneId);
 
       // Send as broadcast with zone info in data
-      return this.notificationService.createBroadcast(
+      return this.notificationService.createTopicBroadcast(
+        `zone_${body.zoneId}`,
         body.title,
         body.body,
         NotificationType.EPIDEMIC_ALERT,
         {
+          audience: 'zone',
           zoneId: body.zoneId,
           zoneName: zone.name,
         },

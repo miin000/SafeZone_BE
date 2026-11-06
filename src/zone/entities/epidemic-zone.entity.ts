@@ -25,7 +25,6 @@ export enum ZoneLifecycleStatus {
 
 export enum ZoneSource {
   MANUAL = 'manual',
-  DBSCAN = 'dbscan',
 }
 
 @Entity('epidemic_zones')
@@ -63,6 +62,12 @@ export class EpidemicZone {
 
   @Column({ default: 0 })
   caseCount: number;
+
+  @Column('float', { name: 'risk_score', nullable: true })
+  riskScore: number | null;
+
+  @Column('jsonb', { name: 'risk_components', nullable: true })
+  riskComponents: Record<string, number> | null;
 
   @Column('text', { nullable: true })
   description: string | null;

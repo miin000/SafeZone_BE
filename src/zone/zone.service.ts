@@ -9,7 +9,6 @@ import {
 } from './entities/epidemic-zone.entity';
 import { CreateZoneDto } from './dto/create-zone.dto';
 import { UpdateZoneDto } from './dto/update-zone.dto';
-import { GisService } from '../gis/gis.service';
 
 interface FindAllZoneParams {
   onlyActive?: boolean;
@@ -17,42 +16,30 @@ interface FindAllZoneParams {
   source?: ZoneSource;
 }
 
-interface ProposeZonesFromDbscanParams {
-  from?: string;
-  to?: string;
-  diseaseTypes?: string[];
-  epsKm?: number;
-  minPoints?: number;
-  minClusterCases?: number;
-  minConfidence?: number;
-  proposedBy?: string;
-}
-
-interface DbscanPreviewSummary {
-  diseaseType: string;
-  totalClusters: number;
-  eligibleClusters: number;
-  estimatedProposals: number;
-  skipped: {
-    clusterTooSmall: number;
-    lowConfidence: number;
-    invalidCenter: number;
-    overlapWithExistingZone: number;
-  };
-}
-
 @Injectable()
 export class ZoneService implements OnModuleInit {
   private schemaReady = false;
+  // Illustrative weights, not calibrated against epidemiological outcomes.
+  private readonly riskWeights = {
+    disease: Number(process.env.ZONE_RISK_ALPHA || 0.4),
+    cases: Number(process.env.ZONE_RISK_BETA || 0.3),
+    density: Number(process.env.ZONE_RISK_GAMMA || 0.3),
+  };
 
   constructor(
     @InjectRepository(EpidemicZone)
     private zoneRepository: Repository<EpidemicZone>,
     private dataSource: DataSource,
-    private readonly gisService: GisService,
   ) {}
 
   async onModuleInit(): Promise<void> {
+    const weightTotal =
+      this.riskWeights.disease +
+      this.riskWeights.cases +
+      this.riskWeights.density;
+    if (Math.abs(weightTotal - 1) > 0.0001) {
+      throw new Error('ZONE_RISK_ALPHA/BETA/GAMMA must sum to 1');
+    }
     await this.ensureZoneSchema();
   }
 
@@ -145,7 +132,6 @@ export class ZoneService implements OnModuleInit {
       SET "source" = 'manual'
       WHERE "source" IS NULL OR TRIM("source") = ''
     `);
-
     await this.dataSource.query(`
       CREATE INDEX IF NOT EXISTS idx_epidemic_zones_lifecycle
       ON epidemic_zones ("lifecycleStatus")
@@ -158,93 +144,47 @@ export class ZoneService implements OnModuleInit {
     this.schemaReady = true;
   }
 
-  private getRiskLevelFromCluster(
-    combined: number,
-    caseCount: number,
-  ): RiskLevel {
-    if (combined >= 3 || caseCount >= 20) return RiskLevel.CRITICAL;
-    if (combined >= 2 || caseCount >= 8) return RiskLevel.HIGH;
-    if (combined >= 1 || caseCount >= 3) return RiskLevel.MEDIUM;
-    return RiskLevel.LOW;
-  }
-
-  private getProposalConfidence(
-    caseCount: number,
-    severityScore: number,
-    minPoints: number,
-  ): number {
-    const countScore = Math.min(1, caseCount / Math.max(minPoints * 4, 6));
-    const severity = Math.min(1, Math.max(0, severityScore / 3));
-    const confidence = 0.65 * countScore + 0.35 * severity;
-    return Number(confidence.toFixed(3));
-  }
-
   private normalizeUserId(userId?: string): string | undefined {
-    if (!userId) return undefined;
-    const clean = userId.trim();
-    return clean.length > 0 ? clean : undefined;
-  }
-
-  private async resolveDiseaseTypes(diseaseTypes?: string[]) {
-    return Array.isArray(diseaseTypes) && diseaseTypes.length > 0
-      ? diseaseTypes
-      : (
-          await this.dataSource.query(
-            `
-            SELECT DISTINCT disease_type
-            FROM cases
-            WHERE disease_type IS NOT NULL
-              AND is_archived IS NOT TRUE
-            ORDER BY disease_type ASC
-            `,
-          )
-        ).map((r: any) => String(r.disease_type));
+    const clean = userId?.trim();
+    return clean || undefined;
   }
 
   private async countCasesInZoneRadius(
     zone: EpidemicZone,
     options?: { from?: string; to?: string },
   ): Promise<number> {
-    const lon = Number(zone.center?.coordinates?.[0]);
-    const lat = Number(zone.center?.coordinates?.[1]);
-    const radiusKm = Number(zone.radiusKm || 0);
-
-    if (
-      !Number.isFinite(lon) ||
-      !Number.isFinite(lat) ||
-      !Number.isFinite(radiusKm) ||
-      radiusKm <= 0
-    ) {
+    const [lon, lat] = zone.center?.coordinates || [];
+    if (!Number.isFinite(lon) || !Number.isFinite(lat) || zone.radiusKm <= 0) {
       return 0;
     }
 
-    const where: string[] = [
+    const values: unknown[] = [
+      zone.diseaseId,
+      lon,
+      lat,
+      zone.radiusKm * 1000,
+      zone.diseaseType,
+    ];
+    const filters = [
       'c.geom IS NOT NULL',
-      // Prefer FK match when zone has diseaseId; fallback to legacy text
-      '(($1::uuid IS NOT NULL AND c.disease_id = $1::uuid) OR ($1::uuid IS NULL AND c.disease_type = $5))',
+      '((c.disease_id = $1::uuid) OR (c.disease_id IS NULL AND c.disease_type = $5))',
       'c.is_archived IS NOT TRUE',
+      'c.status = \'confirmed\'',
       'ST_DWithin(c.geom::geography, ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography, $4)',
     ];
-    const values: any[] = [zone.diseaseId || null, lon, lat, radiusKm * 1000, zone.diseaseType];
-
     if (options?.from) {
       values.push(options.from);
-      where.push(`c.reported_time >= $${values.length}::timestamptz`);
+      filters.push(`c.reported_time >= $${values.length}::timestamptz`);
     }
     if (options?.to) {
       values.push(options.to);
-      where.push(`c.reported_time <= $${values.length}::timestamptz`);
+      filters.push(`c.reported_time <= $${values.length}::timestamptz`);
     }
 
     const [row] = await this.dataSource.query(
-      `
-      SELECT COUNT(*)::int AS count
-      FROM cases c
-      WHERE ${where.join(' AND ')}
-      `,
+      `SELECT COUNT(*)::int AS count FROM cases c WHERE ${filters.join(' AND ')}`,
       values,
     );
-
     return Number(row?.count || 0);
   }
 
@@ -268,7 +208,7 @@ export class ZoneService implements OnModuleInit {
             OR (z2."diseaseId" IS NOT NULL AND c.disease_id IS NULL AND c.disease_type = z2."diseaseType")
           )
           AND c.is_archived IS NOT TRUE
-          AND c.status IN ('suspected', 'probable', 'confirmed', 'under treatment', 'under observation')
+          AND c.status = 'confirmed'
           AND ST_DWithin(
             z2.center::geography,
             c.geom::geography,
@@ -281,6 +221,58 @@ export class ZoneService implements OnModuleInit {
         AND z."source" = 'manual'
       `,
     );
+    await this.recalculateAllRisks();
+  }
+
+  private async recalculateAllRisks(): Promise<void> {
+    const zones = await this.zoneRepository.find({
+      where: { lifecycleStatus: ZoneLifecycleStatus.APPROVED },
+    });
+    if (!zones.length) return;
+
+    const counts = zones.map((zone) => Number(zone.caseCount || 0));
+    const densities = zones.map((zone) => {
+      const area = Math.PI * Math.max(Number(zone.radiusKm), 0.1) ** 2;
+      return Number(zone.caseCount || 0) / area;
+    });
+    const minMax = (values: number[]) => ({
+      min: Math.min(...values),
+      max: Math.max(...values),
+    });
+    const countRange = minMax(counts);
+    const densityRange = minMax(densities);
+
+    for (const zone of zones) {
+      const [disease] = await this.dataSource.query(
+        `SELECT sd FROM diseases WHERE id = $1 OR ($1 IS NULL AND name = $2) LIMIT 1`,
+        [zone.diseaseId, zone.diseaseType],
+      );
+      const diseaseScore = Math.min(1, Math.max(0, (Number(disease?.sd || 4) - 4) / 8));
+      const count = Number(zone.caseCount || 0);
+      const density = count / (Math.PI * Math.max(Number(zone.radiusKm), 0.1) ** 2);
+      const normalize = (value: number, range: { min: number; max: number }) =>
+        range.max === range.min ? 0 : (value - range.min) / (range.max - range.min);
+      const caseScore = normalize(count, countRange);
+      const densityScore = normalize(density, densityRange);
+      const total =
+        this.riskWeights.disease * diseaseScore +
+        this.riskWeights.cases * caseScore +
+        this.riskWeights.density * densityScore;
+
+      zone.riskScore = Number(total.toFixed(4));
+      zone.riskComponents = {
+        disease: Number(diseaseScore.toFixed(4)),
+        cases: Number(caseScore.toFixed(4)),
+        density: Number(densityScore.toFixed(4)),
+      };
+      zone.riskLevel =
+        total < 0.4
+          ? RiskLevel.LOW
+          : total < 0.7
+            ? RiskLevel.MEDIUM
+            : RiskLevel.HIGH;
+      await this.zoneRepository.save(zone);
+    }
   }
 
   async create(
@@ -347,41 +339,7 @@ export class ZoneService implements OnModuleInit {
 
     const zones = await qb.getMany();
 
-    // For DBSCAN proposals waiting for approval, keep displayed count consistent
-    // with proposal evidence (cluster count) and the current radius-based count.
-    const normalized = await Promise.all(
-      zones.map(async (zone) => {
-        if (
-          zone.lifecycleStatus !== ZoneLifecycleStatus.PENDING_APPROVAL ||
-          zone.source !== ZoneSource.DBSCAN
-        ) {
-          return zone;
-        }
-
-        const metadata = zone.proposalMetadata || {};
-        const clusterCaseCount = Number(metadata?.clusterCaseCount ?? NaN);
-        const radiusCaseCount = await this.countCasesInZoneRadius(zone, {
-          from: metadata?.parameters?.from,
-          to: metadata?.parameters?.to,
-        });
-
-        const stableCount = Math.max(
-          Number(zone.caseCount || 0),
-          Number.isFinite(clusterCaseCount) ? clusterCaseCount : 0,
-          radiusCaseCount,
-        );
-
-        zone.caseCount = stableCount;
-        zone.proposalMetadata = {
-          ...metadata,
-          radiusCaseCountCurrent: radiusCaseCount,
-        };
-
-        return zone;
-      }),
-    );
-
-    return normalized;
+    return zones;
   }
 
   async findOne(id: string): Promise<EpidemicZone> {
@@ -502,12 +460,7 @@ export class ZoneService implements OnModuleInit {
     note?: string,
   ): Promise<EpidemicZone> {
     const zone = await this.findOne(id);
-    const metadata = zone.proposalMetadata || {};
-    const clusterCaseCount = Number(metadata?.clusterCaseCount ?? 0);
-    const radiusCaseCount = await this.countCasesInZoneRadius(zone, {
-      from: metadata?.parameters?.from,
-      to: metadata?.parameters?.to,
-    });
+    const radiusCaseCount = await this.countCasesInZoneRadius(zone);
 
     zone.lifecycleStatus = ZoneLifecycleStatus.APPROVED;
     zone.isActive = true;
@@ -515,17 +468,9 @@ export class ZoneService implements OnModuleInit {
     zone.reviewedBy = this.normalizeUserId(reviewerId) || zone.reviewedBy;
     zone.reviewNote = note || zone.reviewNote;
     zone.startDate = zone.startDate || new Date();
-    zone.caseCount = Math.max(
-      Number(zone.caseCount || 0),
-      clusterCaseCount,
-      radiusCaseCount,
-    );
-    zone.proposalMetadata = {
-      ...metadata,
-      clusterCaseCount,
-      radiusCaseCountAtApproval: radiusCaseCount,
-      approvedCaseCount: zone.caseCount,
-    };
+    zone.caseCount = Math.max(Number(zone.caseCount || 0), radiusCaseCount);
+    zone.proposalMetadata = null;
+    zone.proposalConfidence = null;
 
     await this.zoneRepository.save(zone);
     await this.syncCaseCountsFromReports();
@@ -548,345 +493,6 @@ export class ZoneService implements OnModuleInit {
     return this.findOne(id);
   }
 
-  async previewDbscanProposals(params: ProposeZonesFromDbscanParams) {
-    const {
-      from,
-      to,
-      diseaseTypes,
-      epsKm = 3,
-      minPoints = 4,
-      minClusterCases = 3,
-      minConfidence = 0.45,
-    } = params;
-
-    const sourceDiseaseTypes = await this.resolveDiseaseTypes(diseaseTypes);
-    const summary: DbscanPreviewSummary[] = [];
-
-    for (const diseaseType of sourceDiseaseTypes) {
-      const stat: DbscanPreviewSummary = {
-        diseaseType,
-        totalClusters: 0,
-        eligibleClusters: 0,
-        estimatedProposals: 0,
-        skipped: {
-          clusterTooSmall: 0,
-          lowConfidence: 0,
-          invalidCenter: 0,
-          overlapWithExistingZone: 0,
-        },
-      };
-
-      const clusterResponse: any = await this.gisService.getClusteredCases({
-        diseaseType,
-        from,
-        to,
-        clusterDistanceKm: epsKm,
-        minPoints,
-        includeNoise: false,
-      });
-
-      const clusters = Array.isArray(clusterResponse?.clusters)
-        ? clusterResponse.clusters
-        : [];
-      stat.totalClusters = clusters.length;
-
-      for (const cluster of clusters) {
-        const caseCount = Number(cluster?.count || 0);
-        const severityScore = Number(cluster?.severity?.score || 1);
-        const confidence = this.getProposalConfidence(
-          caseCount,
-          severityScore,
-          minPoints,
-        );
-
-        if (caseCount < minClusterCases) {
-          stat.skipped.clusterTooSmall += 1;
-          continue;
-        }
-
-        if (confidence < minConfidence) {
-          stat.skipped.lowConfidence += 1;
-          continue;
-        }
-
-        const centerLat = Number(cluster?.center?.lat);
-        const centerLon = Number(cluster?.center?.lon);
-        if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) {
-          stat.skipped.invalidCenter += 1;
-          continue;
-        }
-
-        const farthestKm = Number(cluster?.spatial?.maxDistanceKm || 0);
-        const epsBasedRadius = Math.max(0.3, epsKm * 1.1);
-        const farthestBasedRadius = Math.max(
-          0.3,
-          farthestKm + Math.max(0.25, epsKm * 0.12),
-        );
-        const radiusKm = Math.max(
-          0.3,
-          Math.min(
-            80,
-            Number(Math.max(epsBasedRadius, farthestBasedRadius).toFixed(2)),
-          ),
-        );
-        const [nearExisting] = await this.dataSource.query(
-          `
-          SELECT z.id
-          FROM epidemic_zones z
-          WHERE z."diseaseType" = $1
-            AND z."lifecycleStatus" IN ('pending_approval', 'approved')
-            AND ST_DWithin(
-              z.center::geography,
-              ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
-              GREATEST((z."radiusKm" + $4) * 500, 300)
-            )
-            AND z."createdAt" >= NOW() - INTERVAL '21 days'
-          LIMIT 1
-          `,
-          [diseaseType, centerLon, centerLat, radiusKm],
-        );
-
-        if (nearExisting?.id) {
-          stat.skipped.overlapWithExistingZone += 1;
-          continue;
-        }
-
-        stat.eligibleClusters += 1;
-      }
-
-      stat.estimatedProposals = stat.eligibleClusters;
-      summary.push(stat);
-    }
-
-    const totals = summary.reduce(
-      (acc, s) => {
-        acc.totalClusters += s.totalClusters;
-        acc.eligibleClusters += s.eligibleClusters;
-        acc.estimatedProposals += s.estimatedProposals;
-        acc.skipped.clusterTooSmall += s.skipped.clusterTooSmall;
-        acc.skipped.lowConfidence += s.skipped.lowConfidence;
-        acc.skipped.invalidCenter += s.skipped.invalidCenter;
-        acc.skipped.overlapWithExistingZone +=
-          s.skipped.overlapWithExistingZone;
-        return acc;
-      },
-      {
-        totalClusters: 0,
-        eligibleClusters: 0,
-        estimatedProposals: 0,
-        skipped: {
-          clusterTooSmall: 0,
-          lowConfidence: 0,
-          invalidCenter: 0,
-          overlapWithExistingZone: 0,
-        },
-      },
-    );
-
-    return {
-      parameters: {
-        from,
-        to,
-        epsKm,
-        minPoints,
-        minClusterCases,
-        minConfidence,
-      },
-      diseaseCount: sourceDiseaseTypes.length,
-      totals,
-      summary,
-    };
-  }
-
-  async proposeFromDbscan(params: ProposeZonesFromDbscanParams) {
-    const {
-      from,
-      to,
-      diseaseTypes,
-      epsKm = 3,
-      minPoints = 4,
-      minClusterCases = 3,
-      minConfidence = 0.45,
-      proposedBy,
-    } = params;
-
-    const sourceDiseaseTypes = await this.resolveDiseaseTypes(diseaseTypes);
-
-    const created: EpidemicZone[] = [];
-    const skipped: Array<{
-      diseaseType: string;
-      reason: string;
-      clusterId?: string;
-    }> = [];
-
-    for (const diseaseType of sourceDiseaseTypes) {
-      const clusterResponse: any = await this.gisService.getClusteredCases({
-        diseaseType,
-        from,
-        to,
-        clusterDistanceKm: epsKm,
-        minPoints,
-        includeNoise: false,
-      });
-
-      const clusters = Array.isArray(clusterResponse?.clusters)
-        ? clusterResponse.clusters
-        : [];
-
-      for (const cluster of clusters) {
-        const caseCount = Number(cluster?.count || 0);
-        const severityScore = Number(cluster?.severity?.score || 1);
-        const confidence = this.getProposalConfidence(
-          caseCount,
-          severityScore,
-          minPoints,
-        );
-
-        if (caseCount < minClusterCases) {
-          skipped.push({
-            diseaseType,
-            clusterId: String(cluster?.id ?? ''),
-            reason: 'cluster_too_small',
-          });
-          continue;
-        }
-        if (confidence < minConfidence) {
-          skipped.push({
-            diseaseType,
-            clusterId: String(cluster?.id ?? ''),
-            reason: 'low_confidence',
-          });
-          continue;
-        }
-
-        const centerLat = Number(cluster?.center?.lat);
-        const centerLon = Number(cluster?.center?.lon);
-        if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) {
-          skipped.push({
-            diseaseType,
-            clusterId: String(cluster?.id ?? ''),
-            reason: 'invalid_cluster_center',
-          });
-          continue;
-        }
-
-        const farthestKm = Number(cluster?.spatial?.maxDistanceKm || 0);
-        const epsBasedRadius = Math.max(0.3, epsKm * 1.1);
-        const farthestBasedRadius = Math.max(
-          0.3,
-          farthestKm + Math.max(0.25, epsKm * 0.12),
-        );
-        const radiusKm = Math.max(
-          0.3,
-          Math.min(
-            80,
-            Number(Math.max(epsBasedRadius, farthestBasedRadius).toFixed(2)),
-          ),
-        );
-        const [nearExisting] = await this.dataSource.query(
-          `
-          SELECT z.id
-          FROM epidemic_zones z
-          WHERE z."diseaseType" = $1
-            AND z."lifecycleStatus" IN ('pending_approval', 'approved')
-            AND ST_DWithin(
-              z.center::geography,
-              ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
-              GREATEST((z."radiusKm" + $4) * 500, 300)
-            )
-            AND z."createdAt" >= NOW() - INTERVAL '21 days'
-          LIMIT 1
-          `,
-          [diseaseType, centerLon, centerLat, radiusKm],
-        );
-
-        if (nearExisting?.id) {
-          skipped.push({
-            diseaseType,
-            clusterId: String(cluster?.id ?? ''),
-            reason: 'overlap_with_existing_zone',
-          });
-          continue;
-        }
-
-        const riskLevel = this.getRiskLevelFromCluster(
-          Number(cluster?.severity?.combined || 1),
-          caseCount,
-        );
-        const now = new Date();
-        const zone = this.zoneRepository.create({
-          name: `Đề xuất ổ dịch ${diseaseType} (${now.toLocaleDateString('vi-VN')})`,
-          diseaseType,
-          center: { type: 'Point', coordinates: [centerLon, centerLat] },
-          radiusKm,
-          riskLevel,
-          caseCount,
-          description:
-            `Đề xuất tự động từ DBSCAN. Cụm #${cluster?.id ?? 'n/a'}, ` +
-            `confidence=${confidence}, eps=${epsKm}km, minPoints=${minPoints}.`,
-          isActive: false,
-          lifecycleStatus: ZoneLifecycleStatus.PENDING_APPROVAL,
-          source: ZoneSource.DBSCAN,
-          proposalConfidence: confidence,
-          proposalMetadata: {
-            algorithm: 'DBSCAN',
-            clusterId: cluster?.id,
-            dbscan: cluster?.dbscan || null,
-            clusterCaseCount: caseCount,
-            spatial: cluster?.spatial || null,
-            severity: cluster?.severity || null,
-            timeRange: cluster?.timeRange || null,
-            parameters: {
-              epsKm,
-              minPoints,
-              minClusterCases,
-              minConfidence,
-              from,
-              to,
-            },
-          },
-          proposedAt: now,
-          proposedBy: this.normalizeUserId(proposedBy) || null,
-        });
-
-        const saved = await this.zoneRepository.save(zone);
-        created.push(saved);
-      }
-    }
-
-    return {
-      createdCount: created.length,
-      skippedCount: skipped.length,
-      created,
-      skipped,
-      parameters: {
-        from,
-        to,
-        epsKm,
-        minPoints,
-        minClusterCases,
-        minConfidence,
-      },
-    };
-  }
-
-  async updateCaseCount(id: string, caseCount: number): Promise<EpidemicZone> {
-    const zone = await this.findOne(id);
-    zone.caseCount = caseCount;
-
-    // Auto-update risk level based on case count
-    if (caseCount >= 100) {
-      zone.riskLevel = RiskLevel.CRITICAL;
-    } else if (caseCount >= 50) {
-      zone.riskLevel = RiskLevel.HIGH;
-    } else if (caseCount >= 20) {
-      zone.riskLevel = RiskLevel.MEDIUM;
-    } else {
-      zone.riskLevel = RiskLevel.LOW;
-    }
-
-    return this.zoneRepository.save(zone);
-  }
 
   async getStats(): Promise<{
     total: number;
