@@ -60,10 +60,14 @@ export class Disease {
   @Column({ name: 'r0', type: 'numeric', nullable: true })
   r0!: number | null;
 
-  @Column({ name: 'has_vaccine', nullable: true })
+  @Column({ name: 'has_vaccine', type: 'boolean', nullable: true })
   hasVaccine!: boolean | null;
 
-  @Column({ name: 'has_specific_treatment', nullable: true })
+  @Column({
+    name: 'has_specific_treatment',
+    type: 'boolean',
+    nullable: true,
+  })
   hasSpecificTreatment!: boolean | null;
 
   @Column({
@@ -73,7 +77,11 @@ export class Disease {
   })
   circulationLevel!: CirculationLevel | null;
 
-  @Column({ name: 'is_novel_special_dangerous', nullable: true })
+  @Column({
+    name: 'is_novel_special_dangerous',
+    type: 'boolean',
+    nullable: true,
+  })
   isNovelSpecialDangerous!: boolean | null;
 
   @Column({ name: 'scoring_notes', type: 'text', nullable: true })
