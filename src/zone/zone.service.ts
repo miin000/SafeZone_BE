@@ -82,6 +82,11 @@ export class ZoneService implements OnModuleInit {
       ALTER TABLE epidemic_zones
       ADD COLUMN IF NOT EXISTS "reviewNote" text
     `);
+    await this.dataSource.query(`
+      ALTER TABLE epidemic_zones
+      ADD COLUMN IF NOT EXISTS "risk_score" double precision,
+      ADD COLUMN IF NOT EXISTS "risk_components" jsonb
+    `);
 
     // Optional FK to diseases catalog
     await this.dataSource.query(
