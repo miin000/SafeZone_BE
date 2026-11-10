@@ -1,98 +1,154 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# SafeZone API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Backend REST API của SafeZone, cung cấp xác thực, dữ liệu dịch bệnh, báo cáo ca bệnh, vùng dịch, GIS, thông báo, bài viết cộng đồng và thông tin y tế cho Admin Web và ứng dụng Flutter.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Công nghệ
 
-## Description
+- NestJS 11 và TypeScript
+- PostgreSQL với TypeORM
+- JWT, Passport và bcrypt
+- Class Validator/Transformer
+- Firebase Admin cho push notification
+- Nodemailer/Resend và Twilio cho các luồng liên lạc tùy chọn
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Module
 
-## Project setup
+| Module | Mục đích |
+|---|---|
+| Auth | Đăng ký, đăng nhập, hồ sơ, xác minh và token |
+| Admin | Chức năng quản trị và audit |
+| Report | Tiếp nhận và xử lý báo cáo ca bệnh |
+| Zone | Tạo, truy vấn và tính mức rủi ro vùng dịch |
+| GIS | Dữ liệu bản đồ và khu vực địa lý |
+| Disease | Danh mục và dữ liệu dịch bệnh |
+| Notification | Thông báo cho người dùng |
+| Post | Bài đăng cộng đồng |
+| Health Info | Nội dung hướng dẫn y tế |
 
-```bash
-$ npm install
+## Yêu cầu
+
+- Node.js 20 trở lên
+- npm 10 trở lên
+- PostgreSQL 14 trở lên hoặc PostgreSQL tương thích như Neon/Render Postgres
+
+## Cài đặt
+
+```powershell
+cd apps/api
+npm install
+Copy-Item .env.example .env
 ```
 
-## Compile and run the project
+Điền thông tin database và các dịch vụ tùy chọn trong `.env`. Không commit file `.env`.
 
-```bash
-# development
-$ npm run start
+### Cấu hình database
 
-# watch mode
-$ npm run start:dev
+Có thể dùng một trong hai cách:
 
-# production mode
-$ npm run start:prod
+```env
+# Database URL của dịch vụ managed
+DATABASE_URL=postgresql://user:password@host:5432/database
+DB_SSL_MODE=require
 ```
 
-## Run tests
+Hoặc dùng các biến rời:
 
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+```env
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=postgres
+DB_PASSWORD=postgres
+DB_DATABASE=safezone
 ```
 
-## Deployment
+Các biến quan trọng khác:
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+```env
+PORT=3002
+NODE_ENV=development
+JWT_SECRET=thay-bang-gia-tri-bi-mat
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+Firebase, email và SMS là các tích hợp tùy chọn. Tên biến đầy đủ được liệt kê trong [.env.example](.env.example).
 
-## Resources
+## Chạy local
 
-Check out a few resources that may come in handy when working with NestJS:
+```powershell
+# Development
+npm run start:dev
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+# Production local
+npm run build
+npm run start:prod
+```
 
-## Support
+API mặc định chạy tại `http://localhost:3002`, với global prefix:
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```text
+http://localhost:3002/api/v1
+```
 
-## Stay in touch
+Route kiểm tra cơ bản: `GET /api/v1`.
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+## Seed dữ liệu
 
-## License
+Script seed ca bệnh nằm trong thư mục `data/`. Chạy từ thư mục API:
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+```powershell
+npm run seed:cases
+```
+
+Chỉ chạy seed trên database đúng môi trường và kiểm tra dữ liệu trước khi chạy production.
+
+## Kiểm thử và lint
+
+```powershell
+npm run test
+npm run test:e2e
+npm run test:cov
+npm run lint
+```
+
+## Cấu trúc thư mục
+
+```text
+src/
+  auth/          # Xác thực và phân quyền
+  admin/         # API quản trị
+  disease/       # Danh mục bệnh
+  gis/           # Dữ liệu GIS
+  health-info/   # Thông tin y tế
+  notification/  # Thông báo
+  post/          # Bài viết cộng đồng
+  report/        # Báo cáo ca bệnh
+  zone/          # Vùng dịch
+  main.ts        # Bootstrap, CORS, validation và port
+```
+
+## Tài liệu API
+
+- [API documentation](../../docs/API_DOCUMENTATION.md)
+- [API reference](../../docs/API_REFERENCE.md)
+- [Mobile API documentation](../../docs/MOBILE_API_DOCUMENTATION.md)
+- [Database tables](../../docs/DB_TABLES_IN_USE.md)
+- [Neon migration guide](../../docs/NEON_MIGRATION_GUIDE.md)
+
+## Triển khai Render
+
+Repository đã có [render.yaml](../../render.yaml) cho service API:
+
+- Root directory: `apps/api`
+- Build command: `npm ci && npm run build`
+- Start command: `npm run start:prod`
+- Health check: `/api/v1`
+
+Trên Render, khai báo `DATABASE_URL`, `JWT_SECRET` và các biến tích hợp cần thiết trong Environment. Render tự cấp `PORT`; ứng dụng đã lắng nghe `process.env.PORT`.
+
+Chi tiết xem [RENDER_DEPLOY.md](../../docs/RENDER_DEPLOY.md).
+
+## Bảo mật
+
+- Không commit `.env`, mật khẩu database, JWT secret, Firebase private key hoặc API key.
+- Production phải dùng `JWT_SECRET` mạnh và database có SSL khi provider yêu cầu.
+- `synchronize` đang tắt; thay đổi schema cần migration hoặc quy trình database được kiểm soát.
+
